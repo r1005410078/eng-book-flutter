@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import '../features/practice/presentation/sentence_practice_screen.dart';
 import 'routes.dart';
 
 part 'app_router.g.dart';
@@ -20,6 +21,17 @@ GoRouter router(Ref ref) {
           key: state.pageKey,
           child: const HomeScreen(),
         ),
+      ),
+      GoRoute(
+        path: Routes.sentencePractice,
+        name: 'sentencePractice',
+        pageBuilder: (context, state) {
+          final id = state.pathParameters['id'] ?? '1';
+          return MaterialPage(
+            key: state.pageKey,
+            child: SentencePracticeScreen(sentenceId: id),
+          );
+        },
       ),
     ],
     errorPageBuilder: (context, state) => MaterialPage(
@@ -66,6 +78,20 @@ class HomeScreen extends StatelessWidget {
                   horizontal: 32,
                   vertical: 16,
                 ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: () => context.go('/practice/sentence/1'),
+              icon: const Icon(Icons.record_voice_over),
+              label: const Text('打开句子练习 (Mock)'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 16,
+                ),
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
               ),
             ),
           ],

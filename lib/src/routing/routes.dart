@@ -18,4 +18,7 @@ class Routes {
 
   // 录音
   static const String recording = '/recording';
+
+  // 句子练习
+  static const String sentencePractice = '/practice/sentence/:id';
 }
