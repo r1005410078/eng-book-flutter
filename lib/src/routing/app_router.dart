@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import '../features/audio_player/screens/audio_player_screen.dart';
 import 'routes.dart';
 
 part 'app_router.g.dart';
@@ -20,14 +19,6 @@ GoRouter router(Ref ref) {
         pageBuilder: (context, state) => MaterialPage(
           key: state.pageKey,
           child: const HomeScreen(),
-        ),
-      ),
-      GoRoute(
-        path: Routes.audioPlayer,
-        name: 'audio-player',
-        pageBuilder: (context, state) => MaterialPage(
-          key: state.pageKey,
-          child: const AudioPlayerScreen(),
         ),
       ),
     ],
