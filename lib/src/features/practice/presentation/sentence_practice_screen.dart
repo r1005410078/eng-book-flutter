@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
 import '../data/mock_data.dart';
 import '../domain/sentence_detail.dart';
+import '../../../routing/routes.dart';
 
 class SentencePracticeScreen extends ConsumerStatefulWidget {
   final String sentenceId;
@@ -235,7 +236,10 @@ class _SentencePracticeScreenState
               right: 12,
               child: Row(
                 children: [
-                  _buildVideoActionIcon(Icons.settings),
+                  GestureDetector(
+                    onTap: () => context.push(Routes.playbackSettings),
+                    child: _buildVideoActionIcon(Icons.settings),
+                  ),
                   const SizedBox(width: 8),
                   _buildVideoActionIcon(Icons.subtitles_off),
                 ],

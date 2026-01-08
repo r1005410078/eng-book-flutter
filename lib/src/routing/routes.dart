@@ -21,4 +21,7 @@ class Routes {
 
   // 句子练习
   static const String sentencePractice = '/practice/sentence/:id';
+
+  // 播放设置
+  static const String playbackSettings = '/practice/settings';
 }

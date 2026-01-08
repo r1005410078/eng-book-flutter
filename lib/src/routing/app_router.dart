@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../features/practice/presentation/sentence_practice_screen.dart';
+import '../features/practice/presentation/playback_settings_screen.dart';
 import 'routes.dart';
 
 part 'app_router.g.dart';
@@ -32,6 +33,14 @@ GoRouter router(Ref ref) {
             child: SentencePracticeScreen(sentenceId: id),
           );
         },
+      ),
+      GoRoute(
+        path: Routes.playbackSettings,
+        name: 'playbackSettings',
+        pageBuilder: (context, state) => MaterialPage(
+          key: state.pageKey,
+          child: const PlaybackSettingsScreen(),
+        ),
       ),
     ],
     errorPageBuilder: (context, state) => MaterialPage(
