@@ -114,38 +114,16 @@ class _SentencePracticeScreenState
     if (!_videoController.value.isInitialized) return;
 
     final currentPos = _videoController.value.position;
-    // debugPrint("Syncing: $currentPos matched index $_currentIndex");
+    // debugPrint("Syncing: $currentPos"); // Uncomment for verbose logs
 
-    // Sync Waveform Visualization
-    // Note: Calling seek on PlayerController frequently might be heavy?
-    // AudioWaveforms PlayerController doesn't have a simple "set visual position" without seeking.
-    // Ideally we assume they play in sync if we started them together, but since we use just_audio/video_player,
-    // we might just need to verify drift.
-    // _waveformController.seekTo(currentPos.inMilliseconds); // This might conflict if it tries to play sound?
-    // Actually AudioFileWaveforms is a Player. If we don't call .play() on it, maybe seekTo just moves the cursor?
-    // Yes, seekTo moves cursor.
-    // Limit updates to UI frames or meaningful changes to avoid stutter.
-    // For now, let's try syncing it.
-    if (_isWaveformReady) {
-      // Only seek if difference is significant to avoid jitter
-      // _waveformController?.seekTo(currentPos.inMilliseconds);
-    }
-    // NOTE: seekTo often triggers native channel calls.
-    // A better approach for purely visual might be finding a way to drive the scroll controller of the widget,
-    // but the package hides it.
-    // Let's try simple update.
-    // _waveformController.seekTo(currentPos.inMilliseconds);
-
-    // Simple linear check or optimized binary search if list is huge.
-    // Given < 100 sentences, linear is fine.
+    // Simple linear check
     for (int i = 0; i < _sentences.length; i++) {
       final s = _sentences[i];
-      // Check if currentPos is within start/end range
       if (currentPos >= s.startTime && currentPos < s.endTime) {
         if (_currentIndex != i) {
+          debugPrint("Scrub sync: Jumped to sentence $i at $currentPos");
           setState(() {
             _currentIndex = i;
-            // Also reset translation visibility when changing sentence?
             _isTranslationVisible = false;
           });
         }
