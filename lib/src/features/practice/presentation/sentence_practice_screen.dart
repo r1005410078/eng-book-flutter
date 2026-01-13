@@ -48,6 +48,12 @@ class _SentencePracticeScreenState
   // Waveform State
   bool _isWaveformReady = false;
 
+  // Video Controls State
+  double _volume = 1.0;
+  double _previousVolume = 1.0; // For mute toggle
+  double _playbackSpeed = 1.0;
+  bool _isFullscreen = false;
+
   @override
   void initState() {
     super.initState();
@@ -316,6 +322,45 @@ class _SentencePracticeScreenState
     _togglePlay();
   }
 
+  // Volume Control
+  void _setVolume(double value) {
+    setState(() {
+      _volume = value;
+      _previousVolume = value > 0 ? value : _previousVolume;
+    });
+    _videoController.setVolume(value);
+    _audioPlayer.setVolume(value);
+    _onUserInteraction();
+  }
+
+  void _toggleMute() {
+    if (_volume > 0) {
+      _setVolume(0);
+    } else {
+      _setVolume(_previousVolume);
+    }
+  }
+
+  // Playback Speed Control
+  void _setPlaybackSpeed(double speed) {
+    setState(() {
+      _playbackSpeed = speed;
+    });
+    _videoController.setPlaybackSpeed(speed);
+    _audioPlayer.setSpeed(speed);
+    _onUserInteraction();
+  }
+
+  // Fullscreen Control
+  void _toggleFullscreen() {
+    setState(() {
+      _isFullscreen = !_isFullscreen;
+    });
+    // Note: Full implementation would require SystemChrome
+    // and proper orientation handling
+    _onUserInteraction();
+  }
+
   @override
   Widget build(BuildContext context) {
     // 提取颜色常量
@@ -559,7 +604,7 @@ class _SentencePracticeScreenState
                       ),
                     ),
 
-                    // Bottom: Waveform + Progress Bar (Merged)
+                    // Bottom: Waveform + Progress Bar + Controls (Enriched)
                     Positioned(
                       bottom: 8,
                       left: 12,
@@ -591,7 +636,7 @@ class _SentencePracticeScreenState
                               ),
                             ),
                           const SizedBox(height: 4),
-                          // Progress bar on top
+                          // Progress bar
                           ClipRRect(
                             borderRadius: BorderRadius.circular(4),
                             child: SizedBox(
@@ -608,6 +653,9 @@ class _SentencePracticeScreenState
                               ),
                             ),
                           ),
+                          const SizedBox(height: 8),
+                          // Control bar with time, volume, speed, fullscreen
+                          _buildVideoControlBar(),
                         ],
                       ),
                     ),
@@ -631,6 +679,102 @@ class _SentencePracticeScreenState
       ),
       alignment: Alignment.center,
       child: Icon(icon, color: Colors.white, size: 20),
+    );
+  }
+
+  Widget _buildVideoControlBar() {
+    final currentPosStr = _formatDuration(_videoController.value.position);
+    final totalDurStr = _formatDuration(_videoController.value.duration);
+
+    return Row(
+      children: [
+        // Time display
+        Text(
+          '$currentPosStr / $totalDurStr',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.9),
+            fontSize: 12,
+            fontFamily: 'Courier',
+          ),
+        ),
+        const SizedBox(width: 12),
+
+        // Play/Pause button
+        GestureDetector(
+          onTap: _togglePlay,
+          child: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.4),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              _isPlaying ? Icons.pause : Icons.play_arrow,
+              color: Colors.white,
+              size: 18,
+            ),
+          ),
+        ),
+
+        const Spacer(),
+
+        // Volume control
+        GestureDetector(
+          onTap: _toggleMute,
+          child: Icon(
+            _volume == 0
+                ? Icons.volume_off
+                : _volume < 0.5
+                    ? Icons.volume_down
+                    : Icons.volume_up,
+            color: Colors.white.withOpacity(0.9),
+            size: 20,
+          ),
+        ),
+        const SizedBox(width: 12),
+
+        // Playback speed
+        GestureDetector(
+          onTap: () {
+            // Cycle through speeds: 1x -> 1.25x -> 1.5x -> 2x -> 0.5x -> 0.75x -> 1x
+            final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+            final currentIndex = speeds.indexOf(_playbackSpeed);
+            final nextIndex = (currentIndex + 1) % speeds.length;
+            _setPlaybackSpeed(speeds[nextIndex]);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: _playbackSpeed != 1.0
+                  ? const Color(0xFFFF9F29).withOpacity(0.3)
+                  : Colors.black.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              '${_playbackSpeed}x',
+              style: TextStyle(
+                color: _playbackSpeed != 1.0
+                    ? const Color(0xFFFF9F29)
+                    : Colors.white.withOpacity(0.9),
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+
+        // Fullscreen button
+        GestureDetector(
+          onTap: _toggleFullscreen,
+          child: Icon(
+            _isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+            color: Colors.white.withOpacity(0.9),
+            size: 20,
+          ),
+        ),
+      ],
     );
   }
 
