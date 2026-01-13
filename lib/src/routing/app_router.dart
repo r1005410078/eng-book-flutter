@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../features/practice/presentation/sentence_practice_screen.dart';
 import '../features/practice/presentation/playback_settings_screen.dart';
+import '../features/practice/presentation/reading_practice_screen.dart';
 import 'routes.dart';
 
 part 'app_router.g.dart';
@@ -41,6 +42,17 @@ GoRouter router(Ref ref) {
           key: state.pageKey,
           child: const PlaybackSettingsScreen(),
         ),
+      ),
+      GoRoute(
+        path: Routes.readingPractice,
+        name: 'readingPractice',
+        pageBuilder: (context, state) {
+          final id = state.pathParameters['id'] ?? '1';
+          return MaterialPage(
+            key: state.pageKey,
+            child: ReadingPracticeScreen(sentenceId: id),
+          );
+        },
       ),
     ],
     errorPageBuilder: (context, state) => MaterialPage(

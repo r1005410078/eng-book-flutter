@@ -830,8 +830,8 @@ class _SentencePracticeScreenState
             icon: const Icon(Icons.menu_book_rounded,
                 color: Colors.white, size: 22),
             onPressed: () {
-              // Placeholder action for text mode
-              debugPrint("Text mode tapped");
+              final currentId = _sentences[_currentIndex].id;
+              context.push('/practice/reading/$currentId');
             },
           ),
         ],

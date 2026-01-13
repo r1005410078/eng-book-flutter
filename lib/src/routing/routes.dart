@@ -24,4 +24,7 @@ class Routes {
 
   // 播放设置
   static const String playbackSettings = '/practice/settings';
+
+  // 阅读练习 (文本模式)
+  static const String readingPractice = '/practice/reading/:id';
 }
