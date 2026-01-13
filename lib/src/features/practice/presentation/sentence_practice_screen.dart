@@ -1,14 +1,9 @@
 import 'dart:async'; // Import dart:async
-import 'dart:io';
 import 'dart:ui';
-import 'package:flutter/foundation.dart'; // Import foundation for kIsWeb
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
-import 'package:just_audio/just_audio.dart'; // Import just_audio
-import 'package:audio_waveforms/audio_waveforms.dart'; // Import audio_waveforms
-import 'package:path_provider/path_provider.dart'; // Import path_provider
 import '../data/mock_data.dart';
 import '../domain/sentence_detail.dart';
 import '../../../routing/routes.dart';
@@ -35,18 +30,13 @@ class _SentencePracticeScreenState
 
   bool _isTranslationVisible = false;
   late VideoPlayerController _videoController;
-  late AudioPlayer _audioPlayer; // Audio Player logic (JustAudio)
-  PlayerController? _waveformController; // Waveform visualization (Nullable)
-
+  // late AudioPlayer _audioPlayer; // Not using separate audio - using video audio
+  // Controls Visibility State
   bool _isPlaying = false;
   bool _isRecording = false;
 
-  // Controls Visibility State
   bool _controlsVisible = true;
   Timer? _hideTimer;
-
-  // Waveform State
-  bool _isWaveformReady = false;
 
   // Video Controls State
   double _volume = 1.0;
@@ -64,7 +54,7 @@ class _SentencePracticeScreenState
     // Video setup
     _videoController = VideoPlayerController.networkUrl(
       Uri.parse(
-          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'),
+          'https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4'),
     )..initialize().then((_) {
         setState(() {});
         // _videoController.play(); // Auto-play disabled to test controls
@@ -73,48 +63,22 @@ class _SentencePracticeScreenState
         _videoController.addListener(_syncSentenceWithVideo);
       });
 
-    // Audio Player setup
-    _audioPlayer = AudioPlayer();
-    _initAudio();
+    // Audio Player setup (using video audio instead)
+    // _audioPlayer = AudioPlayer();
+    // _initAudio();
 
-    // Waveform Controller Setup (Only on native)
-    if (!kIsWeb) {
-      _waveformController = PlayerController();
-      _prepareWaveform();
-    }
+    // Waveform Controller Setup (removed)
+    // if (!kIsWeb) {
+    //   _waveformController = PlayerController();
+    //   _prepareWaveform();
+    // }
 
     // Start timer initially if playing (optional, here we start visible)
     _startHideTimer();
   }
 
-  Future<void> _prepareWaveform() async {
-    if (kIsWeb) return;
-    try {
-      final Directory tempDir = await getTemporaryDirectory();
-      final File tempFile = File('${tempDir.path}/practice_audio.mp3');
-
-      // Download if not exists (or always overwrite for demo)
-      // For demo, we use HttpClient to download
-      if (!await tempFile.exists()) {
-        final request = await HttpClient().getUrl(Uri.parse(
-            'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3'));
-        final response = await request.close();
-        await response.pipe(tempFile.openWrite());
-      }
-
-      await _waveformController?.preparePlayer(
-        path: tempFile.path,
-        noOfSamples: 100, // Reduced samples for smoother look on mobile width
-        shouldExtractWaveform: true,
-      );
-
-      setState(() {
-        _isWaveformReady = true;
-      });
-    } catch (e) {
-      debugPrint("Error preparing waveform: $e");
-    }
-  }
+  // Waveform preparation removed
+  // Future<void> _prepareWaveform() async { ... }
 
   void _syncSentenceWithVideo() {
     if (!_videoController.value.isInitialized) return;
@@ -139,6 +103,10 @@ class _SentencePracticeScreenState
   }
 
   Future<void> _initAudio() async {
+    // Using video audio instead of separate audio player
+    // Audio is handled by VideoPlayerController
+    return;
+    /*
     try {
       // Mock audio loading. Replace with actual URL from _sentence or equivalent
       await _audioPlayer.setUrl(
@@ -152,31 +120,26 @@ class _SentencePracticeScreenState
           });
           if (_isPlaying) {
             _startHideTimer();
-            // Also play waveform controller if we want it to animate smoothly?
-            // If we play it, we get audio doubling.
-            // _waveformController.startPlayer(); // DONT DO THIS unless we mute it.
-            // But PlayerController doesn't expose volume control easily in preparePlayer?
-            // Actually it does: _waveformController.setVolume(0.0)
           } else {
             _cancelHideTimer();
             setState(() => _controlsVisible = true); // Always show when paused
-            // _waveformController.pausePlayer();
           }
         }
       });
     } catch (e) {
       debugPrint("Error loading audio: $e");
     }
+    */
   }
 
   @override
   void dispose() {
     _cancelHideTimer();
-    _stopWaveformSync();
+    // _stopWaveformSync(); // Waveform removed
     _videoController.removeListener(_syncSentenceWithVideo);
     _videoController.dispose();
-    _audioPlayer.dispose();
-    _waveformController?.dispose();
+    // _audioPlayer.dispose(); // Not using separate audio player
+    // _waveformController?.dispose(); // Waveform removed
     super.dispose();
   }
 
@@ -214,26 +177,13 @@ class _SentencePracticeScreenState
 
   void _togglePlay() {
     if (_isPlaying) {
-      _audioPlayer.pause();
+      // _audioPlayer.pause();
       _videoController.pause();
-      if (_isWaveformReady) {
-        _waveformController?.pausePlayer();
-      }
+      // Waveform removed
     } else {
-      _audioPlayer.play();
+      // _audioPlayer.play();
       _videoController.play();
-      if (_isWaveformReady) {
-        // Use audio_waveforms just for visualization but we need it to move.
-        // We can play it but mute it?
-        // Unfortunately PlayerController doesn't have setVolume easily exposed in 1.0.5?
-        // Let's create a sync loop instead of playing two files.
-        // Actually, let's keep it simple: Just play it. Video player is mostly visual?
-        // VideoPlayer has sound. JustAudio has sound. Waveform has sound. That's 3 sounds!
-        // User's request is "draw real waveform".
-        // Assuming we can mute the waveform player?
-        // _waveformController.setVolume(0) is not available?
-        // Let's try to just seek in loop.
-      }
+      // Waveform removed
     }
     // _isPlaying state is updated by listener, but for immediate UI feedback:
     setState(() {
@@ -242,29 +192,17 @@ class _SentencePracticeScreenState
     });
     if (_isPlaying) {
       _startHideTimer();
-      _startWaveformSync();
+      // _startWaveformSync(); // Waveform removed
     } else {
-      _stopWaveformSync();
+      // _stopWaveformSync(); // Waveform removed
     }
   }
 
-  // Custom sync loop for waveform visual
-  Timer? _waveformSyncTimer;
-  void _startWaveformSync() {
-    _waveformSyncTimer?.cancel();
-    _waveformSyncTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
-      if (_isWaveformReady &&
-          _videoController.value.isPlaying &&
-          _waveformController != null) {
-        _waveformController!
-            .seekTo(_videoController.value.position.inMilliseconds);
-      }
-    });
-  }
+  // Waveform sync removed
+  // Timer? _waveformSyncTimer;
+  // void _startWaveformSync() { ... }
 
-  void _stopWaveformSync() {
-    _waveformSyncTimer?.cancel();
-  }
+  // void _stopWaveformSync() { ... }
 
   void _toggleRecord() {
     setState(() {
@@ -298,10 +236,8 @@ class _SentencePracticeScreenState
   void _seekToSentence(int index) {
     final s = _sentences[index];
     _videoController.seekTo(s.startTime);
-    _audioPlayer.seek(s.startTime); // Assume audio synced
-    if (_isWaveformReady) {
-      _waveformController?.seekTo(s.startTime.inMilliseconds);
-    }
+    // _audioPlayer.seek(s.startTime); // Not using separate audio
+    // Waveform removed
   }
 
   void _handleReplay5s() {
@@ -309,11 +245,9 @@ class _SentencePracticeScreenState
     final position =
         _videoController.value.position - const Duration(seconds: 5);
     final newPos = position < Duration.zero ? Duration.zero : position;
-    _audioPlayer.seek(newPos);
+    // _audioPlayer.seek(newPos); // Not using separate audio
     _videoController.seekTo(newPos); // Sync video
-    if (_isWaveformReady) {
-      _waveformController?.seekTo(newPos.inMilliseconds);
-    }
+    // Waveform removed
     _onUserInteraction();
   }
 
@@ -329,7 +263,7 @@ class _SentencePracticeScreenState
       _previousVolume = value > 0 ? value : _previousVolume;
     });
     _videoController.setVolume(value);
-    _audioPlayer.setVolume(value);
+    // _audioPlayer.setVolume(value); // Not using separate audio
     _onUserInteraction();
   }
 
@@ -347,7 +281,7 @@ class _SentencePracticeScreenState
       _playbackSpeed = speed;
     });
     _videoController.setPlaybackSpeed(speed);
-    _audioPlayer.setSpeed(speed);
+    // _audioPlayer.setSpeed(speed); // Not using separate audio
     _onUserInteraction();
   }
 
@@ -421,20 +355,23 @@ class _SentencePracticeScreenState
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         const Icon(Icons.volume_up_rounded,
-                            color: accentColor, size: 20),
-                        const SizedBox(width: 8),
+                            color: accentColor, size: 18),
+                        const SizedBox(width: 6),
                         Flexible(
                           child: Text(
                             currentSentence.phonetic,
                             textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: Colors.grey[500],
-                              fontSize: 16,
+                              fontSize: 13,
                               fontFamily: 'Courier',
+                              height: 1.2,
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
                       ],
                     ),
                     const SizedBox(height: 24),
@@ -559,36 +496,25 @@ class _SentencePracticeScreenState
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    // Dim Overlay
-                    Container(
-                      color: Colors.black.withOpacity(0.2),
-                    ),
-
-                    // Center Play Button
+                    // Dim Overlay with tap to toggle controls
                     GestureDetector(
-                      onTap: _togglePlay,
+                      onTap: () {
+                        setState(() {
+                          _controlsVisible = !_controlsVisible;
+                        });
+                        if (_controlsVisible) {
+                          _startHideTimer();
+                        }
+                      },
                       child: Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.2),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                              color: Colors.white.withOpacity(0.5), width: 1),
-                        ),
-                        child: Icon(
-                            _isPlaying
-                                ? Icons.pause_rounded
-                                : Icons.play_arrow_rounded,
-                            color: Colors.white,
-                            size: 40),
+                        color: Colors.black.withOpacity(0.2),
                       ),
                     ),
 
                     // Top Right Icons
                     Positioned(
-                      top: 16,
-                      right: 16,
+                      top: 12,
+                      right: 12,
                       child: Row(
                         children: [
                           GestureDetector(
@@ -598,13 +524,13 @@ class _SentencePracticeScreenState
                             },
                             child: _buildVideoActionIcon(Icons.settings),
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 8),
                           _buildVideoActionIcon(Icons.subtitles_off),
                         ],
                       ),
                     ),
 
-                    // Bottom: Waveform + Progress Bar + Controls (Enriched)
+                    // Bottom: Progress Bar + Controls
                     Positioned(
                       bottom: 8,
                       left: 12,
@@ -612,30 +538,6 @@ class _SentencePracticeScreenState
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Subtle waveform background
-                          if (!kIsWeb &&
-                              _isWaveformReady &&
-                              _waveformController != null)
-                            SizedBox(
-                              height: 40,
-                              child: AudioFileWaveforms(
-                                size: Size(
-                                    MediaQuery.of(context).size.width - 24, 40),
-                                playerController: _waveformController!,
-                                enableSeekGesture: false,
-                                waveformType: WaveformType.fitWidth,
-                                playerWaveStyle: PlayerWaveStyle(
-                                  fixedWaveColor:
-                                      Colors.white.withOpacity(0.08),
-                                  liveWaveColor:
-                                      const Color(0xFFFF9F29).withOpacity(0.15),
-                                  spacing: 3,
-                                  waveThickness: 1.5,
-                                  showSeekLine: false,
-                                ),
-                              ),
-                            ),
-                          const SizedBox(height: 4),
                           // Progress bar
                           ClipRRect(
                             borderRadius: BorderRadius.circular(4),
@@ -654,7 +556,7 @@ class _SentencePracticeScreenState
                             ),
                           ),
                           const SizedBox(height: 8),
-                          // Control bar with time, volume, speed, fullscreen
+                          // Control bar
                           _buildVideoControlBar(),
                         ],
                       ),
@@ -670,15 +572,22 @@ class _SentencePracticeScreenState
   }
 
   Widget _buildVideoActionIcon(IconData icon) {
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.4),
-        shape: BoxShape.circle,
+    return ClipOval(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10.0, sigmaY: 10.0),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.3),
+            shape: BoxShape.circle,
+            border:
+                Border.all(color: Colors.white.withOpacity(0.1), width: 0.5),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, color: Colors.white, size: 16),
+        ),
       ),
-      alignment: Alignment.center,
-      child: Icon(icon, color: Colors.white, size: 20),
     );
   }
 
@@ -878,14 +787,19 @@ class _SentencePracticeScreenState
 
   Widget _buildHeader(BuildContext context, Color accentColor) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Left: Close Button
+          // Left: Back Button
           IconButton(
-            icon: const Icon(Icons.close, color: Colors.grey),
-            onPressed: () => context.pop(),
+            icon: const Icon(Icons.arrow_back_ios_new,
+                color: Colors.white, size: 20),
+            onPressed: () {
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+              }
+            },
           ),
 
           // Center: Title + Progress Text
@@ -900,30 +814,25 @@ class _SentencePracticeScreenState
                   fontSize: 16,
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               Text(
                 "第 ${_currentIndex + 1} / ${_sentences.length} 句",
                 style: TextStyle(
                   color: Colors.grey[500],
-                  fontSize: 12,
+                  fontSize: 10,
                 ),
               ),
             ],
           ),
 
-          // Right: Menu Icon
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: IconButton(
-              icon: const Icon(Icons.menu_rounded, color: Colors.grey),
-              onPressed: () {
-                // Placeholder action
-                debugPrint("Menu tapped");
-              },
-            ),
+          // Right: Text Mode Icon (Book)
+          IconButton(
+            icon: const Icon(Icons.menu_book_rounded,
+                color: Colors.white, size: 22),
+            onPressed: () {
+              // Placeholder action for text mode
+              debugPrint("Text mode tapped");
+            },
           ),
         ],
       ),

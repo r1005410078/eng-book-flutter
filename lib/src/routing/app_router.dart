@@ -79,7 +79,7 @@ class HomeScreen extends StatelessWidget {
 
             // 导航到音频播放器
             ElevatedButton.icon(
-              onPressed: () => context.go(Routes.audioPlayer),
+              onPressed: () => context.push(Routes.audioPlayer),
               icon: const Icon(Icons.play_circle_outline),
               label: const Text('打开音频播放器'),
               style: ElevatedButton.styleFrom(
@@ -91,7 +91,7 @@ class HomeScreen extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             ElevatedButton.icon(
-              onPressed: () => context.go('/practice/sentence/1'),
+              onPressed: () => context.push('/practice/sentence/1'),
               icon: const Icon(Icons.record_voice_over),
               label: const Text('打开句子练习 (Mock)'),
               style: ElevatedButton.styleFrom(
