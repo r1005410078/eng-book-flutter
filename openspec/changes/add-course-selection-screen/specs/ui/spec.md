@@ -1,37 +1,37 @@
 # key: add-course-selection-screen
 
-# UI Spec: Course Selection Screen
+# UI Spec: 课程选择页面
 
 ## ADDED Requirements
 
-### Requirement: Entry Point
+### Requirement: 入口
 
-The specific icon on the Home Screen MUST open the Course Selection Screen.
+必须 (MUST) 通过首页右上角的特定图标打开课程选择页面。
 
-#### Scenario: Open Selection
+#### Scenario: 打开选择页
 
-- **Given** The user is on the Home Screen
-- **When** The user taps the top-right "Book/Menu" icon
-- **Then** The Course Selection Screen appears as a full-screen modal/dialog
+- **Given** 用户在首页
+- **When** 用户点击右上角的“书本/菜单”图标
+- **Then** 课程选择页面应以全屏弹窗的形式出现
 
-### Requirement: Category Filter
+### Requirement: 分类筛选
 
-The screen MUST display a horizontal list of categories.
+页面必须 (MUST) 显示一个横向滚动的分类列表。
 
-#### Scenario: Select Category
+#### Scenario: 选择分类
 
-- **Given** The filter bar shows "全部", "我的", etc.
-- **When** The user taps "视频"
-- **Then** The chip becomes active (Orange background)
-- **And** The course list filters to show only video courses (Mock logic: just update UI state)
+- **Given** 筛选栏显示“全部”、“我的”等
+- **When** 用户点击“视频”
+- **Then** 该标签变为激活状态（橙色背景）
+- **And** 课程列表仅显示视频类型的课程（Mock 逻辑：更新 UI 状态即可）
 
-### Requirement: Course Grid
+### Requirement: 课程网格
 
-The screen MUST display courses in a grid layout.
+页面必须 (MUST) 以网格布局展示课程。
 
-#### Scenario: View Courses
+#### Scenario: 查看课程
 
-- **Given** The user views the grid
-- **Then** Each card shows cover image, title, chapter count
-- **And** "Continue Learning" tag appears on the active course
-- **And** Different icons represent media type (Podcast vs Video) - (Mock data)
+- **Given** 用户查看网格列表
+- **Then** 每个卡片显示封面图、标题、章节数
+- **And** 正在学习的课程显示“继续学习”标签
+- **And** 不同的图标代表不同的媒体类型（播客 vs 视频） - (Mock 数据)
