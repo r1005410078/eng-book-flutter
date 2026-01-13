@@ -44,7 +44,7 @@ dependencies:
 
   # Audio/Video Processing - Core
   just_audio: ^0.9.36 # 音频播放（核心）
-  record: ^5.0.0 # 录音功能
+  record: ^5.1.2 # 录音功能
   audio_waveforms: ^1.0.5 # 音频波形可视化
 
   # Audio/Video Processing - Optional
@@ -110,3 +110,7 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+dependency_overrides:
+  # Fix iOS build issue with record_linux
+  record_linux: ^1.0.0
