@@ -357,10 +357,6 @@ class _SentencePracticeScreenState
                     // Video Area
                     _buildVideoArea(),
 
-                    const SizedBox(height: 12),
-                    // Time & Waveform
-                    _buildWaveformArea(accentColor),
-
                     const SizedBox(height: 24),
                     // Sentence Text
                     Text(
@@ -382,15 +378,18 @@ class _SentencePracticeScreenState
                         const Icon(Icons.volume_up_rounded,
                             color: accentColor, size: 20),
                         const SizedBox(width: 8),
-                        Text(
-                          currentSentence.phonetic,
-                          style: TextStyle(
-                            color: Colors.grey[500],
-                            fontSize: 16,
-                            fontFamily: 'Courier',
+                        Flexible(
+                          child: Text(
+                            currentSentence.phonetic,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 16,
+                              fontFamily: 'Courier',
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 8), // Added spacing
+                        const SizedBox(width: 8),
                       ],
                     ),
                     const SizedBox(height: 24),
@@ -560,27 +559,56 @@ class _SentencePracticeScreenState
                       ),
                     ),
 
-                    // Bottom Progress Bar
+                    // Bottom: Waveform + Progress Bar (Merged)
                     Positioned(
-                      bottom: 12,
-                      left: 16,
-                      right: 16,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: SizedBox(
-                          height: 6,
-                          child: VideoProgressIndicator(
-                            _videoController,
-                            allowScrubbing: true,
-                            colors: const VideoProgressColors(
-                              playedColor: Color(0xFFFF9F29),
-                              bufferedColor: Colors.white24,
-                              backgroundColor: Colors.white10,
+                      bottom: 8,
+                      left: 12,
+                      right: 12,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Subtle waveform background
+                          if (!kIsWeb &&
+                              _isWaveformReady &&
+                              _waveformController != null)
+                            SizedBox(
+                              height: 40,
+                              child: AudioFileWaveforms(
+                                size: Size(
+                                    MediaQuery.of(context).size.width - 24, 40),
+                                playerController: _waveformController!,
+                                enableSeekGesture: false,
+                                waveformType: WaveformType.fitWidth,
+                                playerWaveStyle: PlayerWaveStyle(
+                                  fixedWaveColor:
+                                      Colors.white.withOpacity(0.08),
+                                  liveWaveColor:
+                                      const Color(0xFFFF9F29).withOpacity(0.15),
+                                  spacing: 3,
+                                  waveThickness: 1.5,
+                                  showSeekLine: false,
+                                ),
+                              ),
                             ),
-                            padding: EdgeInsets
-                                .zero, // Remove internal padding to fill SizedBox
+                          const SizedBox(height: 4),
+                          // Progress bar on top
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: SizedBox(
+                              height: 4,
+                              child: VideoProgressIndicator(
+                                _videoController,
+                                allowScrubbing: true,
+                                colors: const VideoProgressColors(
+                                  playedColor: Color(0xFFFF9F29),
+                                  bufferedColor: Colors.white24,
+                                  backgroundColor: Colors.white10,
+                                ),
+                                padding: EdgeInsets.zero,
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
                   ],
@@ -603,55 +631,6 @@ class _SentencePracticeScreenState
       ),
       alignment: Alignment.center,
       child: Icon(icon, color: Colors.white, size: 20),
-    );
-  }
-
-  Widget _buildWaveformArea(Color accentColor) {
-    final currentPosStr = _formatDuration(_videoController.value.position);
-    final totalDurStr = _formatDuration(_videoController.value.duration);
-
-    return Column(
-      children: [
-        // Timestamps
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(currentPosStr,
-                  style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-              Text(totalDurStr,
-                  style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        // Waveform
-        SizedBox(
-          height: 60,
-          child: Center(
-            child: (!kIsWeb && _isWaveformReady && _waveformController != null)
-                ? AudioFileWaveforms(
-                    size: Size(MediaQuery.of(context).size.width, 60),
-                    playerController: _waveformController!,
-                    enableSeekGesture: false, // Driven by video
-                    waveformType: WaveformType.fitWidth,
-                    playerWaveStyle: PlayerWaveStyle(
-                      fixedWaveColor: Colors.white.withOpacity(0.3),
-                      liveWaveColor: accentColor,
-                      spacing: 4,
-                      waveThickness: 2,
-                      showSeekLine: false,
-                    ),
-                  )
-                : kIsWeb
-                    ? const Text("Waveform not supported on Web",
-                        style: TextStyle(color: Colors.grey))
-                    : const CircularProgressIndicator(
-                        color: Colors.orange, strokeWidth: 2),
-          ),
-        ),
-      ],
     );
   }
 
