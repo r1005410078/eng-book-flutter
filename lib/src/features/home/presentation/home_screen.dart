@@ -3,6 +3,7 @@ import 'dart:math' as math; // Import math
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../routing/routes.dart';
+import 'course_selection_screen.dart';
 
 // --- Constants ---
 const Color kBgColor = Color(0xFF1a120b);
@@ -163,8 +164,18 @@ class HomeScreen extends StatelessWidget {
           // Right
           Align(
             alignment: Alignment.centerRight,
-            child: Icon(Icons.menu_book_rounded,
-                color: Colors.white.withOpacity(0.8), size: 22),
+            child: GestureDetector(
+              onTap: () {
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  useRootNavigator: true,
+                  builder: (_) => const CourseSelectionScreen(),
+                );
+              },
+              child: Icon(Icons.menu_book_rounded,
+                  color: Colors.white.withOpacity(0.8), size: 22),
+            ),
           ),
         ],
       ),
