@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
 // --- Mock Models ---
@@ -78,6 +79,22 @@ class CourseSelectionScreen extends StatefulWidget {
 
 class _CourseSelectionScreenState extends State<CourseSelectionScreen> {
   int _selectedCategoryIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.immersiveSticky,
+    );
+  }
+
+  @override
+  void dispose() {
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.edgeToEdge,
+    );
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
