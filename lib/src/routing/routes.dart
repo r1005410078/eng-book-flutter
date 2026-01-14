@@ -27,4 +27,7 @@ class Routes {
 
   // 阅读练习 (文本模式)
   static const String readingPractice = '/practice/reading/:id';
+
+  // 课程详情
+  static const String courseDetail = '/course/detail';
 }

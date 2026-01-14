@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../features/home/presentation/home_screen.dart';
+import '../features/home/presentation/course_detail_screen.dart';
+import '../features/home/domain/course.dart';
 import '../features/practice/presentation/playback_settings_screen.dart';
 import '../features/practice/presentation/reading_practice_screen.dart';
 import '../features/practice/presentation/sentence_practice_screen.dart';
@@ -52,6 +54,17 @@ GoRouter router(Ref ref) {
           return MaterialPage(
             key: state.pageKey,
             child: ReadingPracticeScreen(sentenceId: id),
+          );
+        },
+      ),
+      GoRoute(
+        path: Routes.courseDetail,
+        name: 'courseDetail',
+        pageBuilder: (context, state) {
+          final course = state.extra as Course;
+          return MaterialPage(
+            key: state.pageKey,
+            child: CourseDetailScreen(course: course),
           );
         },
       ),

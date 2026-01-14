@@ -1,29 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import '../../../routing/routes.dart';
 
 // --- Mock Models ---
-enum CourseType { video, audio, book }
+import '../domain/course.dart';
 
-class Course {
-  final String id;
-  final String title;
-  final String subtitle;
-  final String? coverUrl;
-  final int progress; // 0-100
-  final bool isContinue; // "继续学习" tag
-  final CourseType type;
-
-  const Course({
-    required this.id,
-    required this.title,
-    required this.subtitle,
-    this.coverUrl,
-    this.progress = 0,
-    this.isContinue = false,
-    required this.type,
-  });
-}
+// --- Mock Models ---
+// Course and CourseType defined in domain/course.dart
 
 final List<Course> mockCourses = [
   const Course(
@@ -224,7 +208,16 @@ class _CourseSelectionScreenState extends State<CourseSelectionScreen> {
               ),
               itemCount: filteredCourses.length,
               itemBuilder: (context, index) {
-                return _buildCourseCard(filteredCourses[index]);
+                return GestureDetector(
+                  onTap: () async {
+                    await context.push(Routes.courseDetail,
+                        extra: filteredCourses[index]);
+                    // When coming back from Detail screen, restore immersive mode
+                    SystemChrome.setEnabledSystemUIMode(
+                        SystemUiMode.immersiveSticky);
+                  },
+                  child: _buildCourseCard(filteredCourses[index]),
+                );
               },
             ),
           ),
