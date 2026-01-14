@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import '../../../routing/routes.dart';
 
@@ -67,16 +66,10 @@ class _CourseSelectionScreenState extends State<CourseSelectionScreen> {
   @override
   void initState() {
     super.initState();
-    SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.immersiveSticky,
-    );
   }
 
   @override
   void dispose() {
-    SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.edgeToEdge,
-    );
     super.dispose();
   }
 
@@ -91,137 +84,177 @@ class _CourseSelectionScreenState extends State<CourseSelectionScreen> {
                 ? mockCourses.where((c) => c.type == CourseType.book).toList()
                 : mockCourses; // Fallback for others
 
-    return Scaffold(
-      backgroundColor: kBgColor,
-      appBar: AppBar(
-        backgroundColor: kBgColor,
-        elevation: 0,
-        centerTitle: false,
-        automaticallyImplyLeading: false,
-        title: const Text(
-          "选择课程",
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 20),
-            child: GestureDetector(
-              onTap: () => context.pop(),
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.08),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.close, color: Colors.white70, size: 20),
+    return SafeArea(
+      child: Container(
+        color: kBgColor,
+        padding: const EdgeInsets.only(top: 47),
+        child: Scaffold(
+          backgroundColor: kBgColor,
+          appBar: AppBar(
+            backgroundColor: kBgColor,
+            elevation: 0,
+            centerTitle: false,
+            automaticallyImplyLeading: false,
+            title: Container(
+              padding: const EdgeInsets.only(right: 16, top: 4, bottom: 4),
+              decoration: BoxDecoration(
+                color: kCardColor,
+                borderRadius:
+                    const BorderRadius.horizontal(right: Radius.circular(24)),
+                border: Border.all(color: Colors.white.withOpacity(0.05)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.2),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
-            ),
-          ),
-        ],
-      ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 12),
-          // Category Filter
-          SizedBox(
-            height: 36,
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              scrollDirection: Axis.horizontal,
-              itemCount: kCategories.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 12),
-              itemBuilder: (context, index) {
-                final isSelected = index == _selectedCategoryIndex;
-                return GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _selectedCategoryIndex = index;
-                    });
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    alignment: Alignment.center,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // The "tag" color strip
+                  Container(
+                    width: 4,
+                    height: 24,
                     decoration: BoxDecoration(
-                      color: isSelected
-                          ? kAccentColor
-                          : Colors.white.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Text(
-                      kCategories[index],
-                      style: TextStyle(
-                        color: isSelected
-                            ? Colors.black
-                            : Colors.white.withOpacity(0.6),
-                        fontSize: 14,
-                        fontWeight:
-                            isSelected ? FontWeight.bold : FontWeight.normal,
-                      ),
+                      color: kAccentColor,
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                );
-              },
+                  const SizedBox(width: 10),
+                  const Text(
+                    "选择课程",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // Count
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              children: [
-                Text(
-                  "共找到 ${filteredCourses.length} 个教程",
-                  style: TextStyle(
-                      color: Colors.white.withOpacity(0.4), fontSize: 12),
+            titleSpacing:
+                0, // Align with left edge more closely if needed, or keep default
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 20),
+                child: GestureDetector(
+                  onTap: () => context.pop(),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.08),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.close,
+                        color: Colors.white70, size: 20),
+                  ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                    child: Container(
-                        height: 1, color: Colors.white.withOpacity(0.05))),
-              ],
-            ),
+              ),
+            ],
           ),
-
-          const SizedBox(height: 20),
-
-          // Grid
-          Expanded(
-            child: GridView.builder(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 10,
-                bottom: MediaQuery.of(context).padding.bottom + 20,
-              ),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                childAspectRatio: 0.65, // Taller cards
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 20,
-              ),
-              itemCount: filteredCourses.length,
-              itemBuilder: (context, index) {
-                return GestureDetector(
-                  onTap: () async {
-                    await context.push(Routes.courseDetail,
-                        extra: filteredCourses[index]);
-                    // When coming back from Detail screen, restore immersive mode
-                    SystemChrome.setEnabledSystemUIMode(
-                        SystemUiMode.immersiveSticky);
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 12),
+              // Category Filter
+              SizedBox(
+                height: 36,
+                child: ListView.separated(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: kCategories.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: 12),
+                  itemBuilder: (context, index) {
+                    final isSelected = index == _selectedCategoryIndex;
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          _selectedCategoryIndex = index;
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? kAccentColor
+                              : Colors.white.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Text(
+                          kCategories[index],
+                          style: TextStyle(
+                            color: isSelected
+                                ? Colors.black
+                                : Colors.white.withOpacity(0.6),
+                            fontSize: 14,
+                            fontWeight: isSelected
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                          ),
+                        ),
+                      ),
+                    );
                   },
-                  child: _buildCourseCard(filteredCourses[index]),
-                );
-              },
-            ),
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // Count
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Text(
+                      "共找到 ${filteredCourses.length} 个教程",
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.4), fontSize: 12),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                        child: Container(
+                            height: 1, color: Colors.white.withOpacity(0.05))),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // Grid
+              Expanded(
+                child: GridView.builder(
+                  padding: EdgeInsets.only(
+                    left: 20,
+                    right: 20,
+                    top: 10,
+                    bottom: MediaQuery.of(context).padding.bottom + 20,
+                  ),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    childAspectRatio: 0.65, // Taller cards
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 20,
+                  ),
+                  itemCount: filteredCourses.length,
+                  itemBuilder: (context, index) {
+                    return GestureDetector(
+                      onTap: () async {
+                        await context.push(Routes.courseDetail,
+                            extra: filteredCourses[index]);
+                      },
+                      child: _buildCourseCard(filteredCourses[index]),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

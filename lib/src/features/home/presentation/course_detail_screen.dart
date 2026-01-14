@@ -16,20 +16,10 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
   @override
   void initState() {
     super.initState();
-    // Force status bar to be visible when entering this screen, but delay it
-    // to prevent it from overlaying the previous screen during the transition animation.
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (mounted) {
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      }
-    });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Determine status bar color style based on background
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
-
     const kBgColor = Color(0xFF1a120b);
     // Use widget.course instead of course
     final course = widget.course;

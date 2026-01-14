@@ -290,7 +290,6 @@ class _SentencePracticeScreenState
     setState(() {
       _isFullscreen = !_isFullscreen;
     });
-    // Note: Full implementation would require SystemChrome
     // and proper orientation handling
     _onUserInteraction();
   }
