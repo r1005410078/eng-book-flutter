@@ -170,7 +170,17 @@ class HomeScreen extends StatelessWidget {
                   context: context,
                   isScrollControlled: true,
                   useRootNavigator: true,
-                  builder: (_) => const CourseSelectionScreen(),
+                  builder: (_) {
+                    final topSafe = MediaQuery.of(
+                      Navigator.of(context).context,
+                    ).padding.top;
+
+                    return Container(
+                      color: kBgColor,
+                      padding: EdgeInsets.only(top: topSafe),
+                      child: const CourseSelectionScreen(),
+                    );
+                  },
                 );
               },
               child: Icon(Icons.menu_book_rounded,
