@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'dart:math' as math; // Import math
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../routing/routes.dart';
@@ -69,60 +70,67 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: kBgColor,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            CustomScrollView(
-              physics: const BouncingScrollPhysics(),
-              slivers: [
-                const SliverToBoxAdapter(child: SizedBox(height: 12)),
-                // Top Bar
-                SliverToBoxAdapter(child: _buildTopBar(context)),
-                const SliverToBoxAdapter(child: SizedBox(height: 20)),
-                // Progress Card
-                SliverToBoxAdapter(child: _buildProgressCard()),
-                const SliverToBoxAdapter(child: SizedBox(height: 40)),
-                // Learning Path
-                SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      if (index == mockNodes.length) {
-                        return const SizedBox(height: 120); // Bottom padding
-                      }
-                      final node = mockNodes[index];
-                      // Calculate River Flow Offset
-                      // Use a sine wave to create a meandering path
-                      // index 0 -> sin(0) = 0
-                      // index 1 -> sin(1.2) ~ 0.93 -> Right
-                      // index 2 -> sin(2.4) ~ 0.67 -> Right (Active)
-                      // index 3 -> sin(3.6) ~ -0.4 -> Left
-                      // index 4 -> sin(4.8) ~ -0.99 -> Left
-                      double xOffset = 50.0 * math.sin(index * 1.5);
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: kBgColor,
+        body: SafeArea(
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              // Top Bar
+              _buildTopBar(context),
+              const SizedBox(height: 20),
+              // Progress Card
+              _buildProgressCard(),
+              // Learning Path
+              Expanded(
+                child: CustomScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  slivers: [
+                    const SliverToBoxAdapter(child: SizedBox(height: 40)),
+                    SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          if (index == mockNodes.length) {
+                            return const SizedBox(
+                                height: 120); // Bottom padding
+                          }
+                          final node = mockNodes[index];
+                          // Calculate River Flow Offset
+                          // Use a sine wave to create a meandering path
+                          // index 0 -> sin(0) = 0
+                          // index 1 -> sin(1.2) ~ 0.93 -> Right
+                          // index 2 -> sin(2.4) ~ 0.67 -> Right (Active)
+                          // index 3 -> sin(3.6) ~ -0.4 -> Left
+                          // index 4 -> sin(4.8) ~ -0.99 -> Left
+                          double xOffset = 50.0 * math.sin(index * 1.5);
 
-                      // Use a larger gap for the active node to make it stand out
-                      double mb = 30;
-                      if (node.status == NodeStatus.active) mb = 50;
-                      if (index > 0 &&
-                          mockNodes[index - 1].status == NodeStatus.active) {
-                        mb = 40;
-                      }
+                          // Use a larger gap for the active node to make it stand out
+                          double mb = 30;
+                          if (node.status == NodeStatus.active) mb = 50;
+                          if (index > 0 &&
+                              mockNodes[index - 1].status ==
+                                  NodeStatus.active) {
+                            mb = 40;
+                          }
 
-                      return Transform.translate(
-                        offset: Offset(xOffset, 0),
-                        child: Padding(
-                          padding: EdgeInsets.only(bottom: mb),
-                          child: _buildPathNodeItem(context, node),
-                        ),
-                      );
-                    },
-                    childCount: mockNodes.length + 1,
-                  ),
+                          return Transform.translate(
+                            offset: Offset(xOffset, 0),
+                            child: Padding(
+                              padding: EdgeInsets.only(bottom: mb),
+                              child: _buildPathNodeItem(context, node),
+                            ),
+                          );
+                        },
+                        childCount: mockNodes.length + 1,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );

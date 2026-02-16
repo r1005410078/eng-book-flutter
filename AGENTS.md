@@ -16,3 +16,11 @@ Use `@/openspec/AGENTS.md` to learn:
 Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
+
+## Assistant Startup Context
+
+Before starting implementation, read:
+- `openspec/assistant-memory.md`
+- `openspec/project.md`
+
+Use them as default context so repeated project background questions are minimized.

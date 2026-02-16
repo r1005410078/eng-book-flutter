@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// 应用主题配置
 class AppTheme {
@@ -19,8 +20,9 @@ class AppTheme {
       appBarTheme: const AppBarTheme(
         centerTitle: true,
         elevation: 0,
+        systemOverlayStyle: SystemUiOverlayStyle.light,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         elevation: 2,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
@@ -48,8 +50,9 @@ class AppTheme {
       appBarTheme: const AppBarTheme(
         centerTitle: true,
         elevation: 0,
+        systemOverlayStyle: SystemUiOverlayStyle.light,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         elevation: 2,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
