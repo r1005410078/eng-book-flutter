@@ -1,0 +1,6 @@
+{
+  "statuses": ["uploaded", "processing", "paused", "ready", "failed", "stopped"],
+  "steps": ["ffmpeg", "asr", "align", "translate", "grammar", "summary", "package"],
+  "hitl_steps": ["translate", "grammar", "summary"],
+  "terminal_statuses": ["ready", "failed", "stopped"]
+}

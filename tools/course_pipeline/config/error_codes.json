@@ -1,0 +1,10 @@
+{
+  "RAW_FOLDER_NOT_FOUND": "Raw folder path does not exist",
+  "RAW_FOLDER_INVALID_NAME": "Raw media naming does not match numeric prefix rule",
+  "RAW_FOLDER_DUPLICATE_LESSON": "Multiple media files found for same lesson key",
+  "TASK_NOT_FOUND": "Task id does not exist",
+  "INVALID_STATUS": "Status is not in allowed state set",
+  "INVALID_STEP": "Step is not in allowed pipeline steps",
+  "WATCH_TIMEOUT": "Task watch timeout reached",
+  "STEP_FAILED": "Pipeline step execution failed"
+}

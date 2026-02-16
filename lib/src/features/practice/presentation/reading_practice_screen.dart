@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../routing/routes.dart';
+import '../data/local_course_package_loader.dart';
 import '../data/mock_data.dart';
 import '../domain/sentence_detail.dart';
 
@@ -20,19 +21,44 @@ class _ReadingPracticeScreenState extends State<ReadingPracticeScreen> {
   static const Color activeCardColor =
       Color(0xFF2C241B); // Slightly lighter brown
 
-  late List<SentenceDetail> _sentences;
+  List<SentenceDetail> _sentences = [];
   int _currentIndex = 0;
+  bool _isLoading = true;
+  String? _loadWarning;
   final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    _sentences = mockSentences;
-    // Find index based on ID, default to 0
-    final index = _sentences.indexWhere((s) => s.id == widget.sentenceId);
-    _currentIndex = index != -1 ? index : 0;
+    _initializeSentences();
+  }
 
-    // Auto scroll to current index after render
+  Future<void> _initializeSentences() async {
+    const packageRoot = String.fromEnvironment(
+      'COURSE_PACKAGE_DIR',
+      defaultValue: 'runtime/latest/package',
+    );
+
+    final loaded =
+        await loadSentencesFromLocalPackage(packageRoot: packageRoot);
+    var list = loaded.sentences;
+    var warning = loaded.warning;
+
+    if (list.isEmpty) {
+      list = mockSentences;
+      warning ??= '本地课程包未就绪，已回退到默认内容。';
+    }
+
+    final index = list.indexWhere((s) => s.id == widget.sentenceId);
+
+    if (!mounted) return;
+    setState(() {
+      _sentences = list;
+      _currentIndex = index != -1 ? index : 0;
+      _isLoading = false;
+      _loadWarning = warning;
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollToCurrent();
     });
@@ -121,6 +147,12 @@ class _ReadingPracticeScreenState extends State<ReadingPracticeScreen> {
   }
 
   Widget _buildBody() {
+    if (_isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: accentColor),
+      );
+    }
+
     return ListView.builder(
       controller: _scrollController,
       padding:
@@ -197,6 +229,17 @@ class _ReadingPracticeScreenState extends State<ReadingPracticeScreen> {
               fontSize: 14,
             ),
           ),
+          if (_loadWarning != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(
+                _loadWarning!,
+                style: TextStyle(
+                  color: Colors.amber.withOpacity(0.8),
+                  fontSize: 12,
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -382,6 +425,8 @@ class _ReadingPracticeScreenState extends State<ReadingPracticeScreen> {
             ),
           ),
 
+          _buildGrammarUsageHints(sentence),
+
           // Footer: Visualizer + Translation
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
@@ -445,6 +490,41 @@ class _ReadingPracticeScreenState extends State<ReadingPracticeScreen> {
       ];
     }
     return [TextSpan(text: text)];
+  }
+
+  Widget _buildGrammarUsageHints(SentenceDetail sentence) {
+    if (sentence.grammarNotes.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final entries = sentence.grammarNotes.entries.take(2).toList();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: entries
+            .map(
+              (e) => Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white.withOpacity(0.08)),
+                ),
+                child: Text(
+                  '${e.key}: ${e.value}',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.7),
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+            )
+            .toList(),
+      ),
+    );
   }
 
   Widget _buildFloatingControls() {

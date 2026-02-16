@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "course_manifest.schema.json",
+  "title": "CourseManifest",
+  "type": "object",
+  "required": ["schema_version", "course_id", "title", "lesson_count", "lessons"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "course_id": {"type": "string", "minLength": 1},
+    "title": {"type": "string", "minLength": 1},
+    "lesson_count": {"type": "integer", "minimum": 1},
+    "lessons": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["lesson_id", "path", "status"],
+        "properties": {
+          "lesson_id": {"type": "string", "pattern": "^[0-9]{2}$"},
+          "path": {"type": "string", "minLength": 1},
+          "status": {"type": "string", "enum": ["ready", "failed", "processing", "paused", "stopped", "uploaded"]}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

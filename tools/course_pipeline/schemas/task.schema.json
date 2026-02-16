@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "task.schema.json",
+  "title": "PipelineTask",
+  "type": "object",
+  "required": ["task_id", "course_id", "course_path", "status", "current_step", "steps", "created_at", "updated_at"],
+  "properties": {
+    "task_id": {"type": "string", "pattern": "^task_[a-z0-9]{8}$"},
+    "course_id": {"type": "string", "minLength": 1},
+    "course_path": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "enum": ["uploaded", "processing", "paused", "ready", "failed", "stopped"]},
+    "current_step": {"type": "string", "enum": ["ffmpeg", "asr", "align", "translate", "grammar", "summary", "package"]},
+    "steps": {
+      "type": "object",
+      "required": ["ffmpeg", "asr", "align", "translate", "grammar", "summary", "package"],
+      "properties": {
+        "ffmpeg": {"type": "string", "enum": ["pending", "running", "done", "failed"]},
+        "asr": {"type": "string", "enum": ["pending", "running", "done", "failed"]},
+        "align": {"type": "string", "enum": ["pending", "running", "done", "failed"]},
+        "translate": {"type": "string", "enum": ["pending", "running", "done", "failed"]},
+        "grammar": {"type": "string", "enum": ["pending", "running", "done", "failed"]},
+        "summary": {"type": "string", "enum": ["pending", "running", "done", "failed"]},
+        "package": {"type": "string", "enum": ["pending", "running", "done", "failed"]}
+      },
+      "additionalProperties": false
+    },
+    "error": {"type": ["object", "null"]},
+    "created_at": {"type": "string"},
+    "updated_at": {"type": "string"}
+  },
+  "additionalProperties": false
+}
