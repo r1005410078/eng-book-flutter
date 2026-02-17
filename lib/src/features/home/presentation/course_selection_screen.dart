@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../routing/routes.dart';
+import '../../practice/application/local_course_provider.dart';
 
 // --- Mock Models ---
 import '../domain/course.dart';
@@ -53,36 +55,53 @@ const Color kBgColor = Color(0xFF1a120b);
 const Color kCardColor = Color(0xFF282018);
 const Color kAccentColor = Color(0xFFFF9F29);
 
-class CourseSelectionScreen extends StatefulWidget {
+class CourseSelectionScreen extends ConsumerStatefulWidget {
   const CourseSelectionScreen({super.key});
 
   @override
-  State<CourseSelectionScreen> createState() => _CourseSelectionScreenState();
+  ConsumerState<CourseSelectionScreen> createState() =>
+      _CourseSelectionScreenState();
 }
 
-class _CourseSelectionScreenState extends State<CourseSelectionScreen> {
+class _CourseSelectionScreenState extends ConsumerState<CourseSelectionScreen> {
   int _selectedCategoryIndex = 0;
 
   @override
-  void initState() {
-    super.initState();
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final localCoursesAsync = ref.watch(localCourseListProvider);
+    final hasLocalCourses = localCoursesAsync.asData != null &&
+        localCoursesAsync.asData!.value.isNotEmpty;
+    final courses = hasLocalCourses
+        ? localCoursesAsync.asData!.value
+            .map(
+              (c) => Course(
+                id: c.courseId,
+                title: c.title,
+                subtitle: '${c.lessonCount} 章节',
+                coverUrl: null,
+                progress: 0,
+                isContinue: false,
+                type: c.mediaType == 'audio'
+                    ? CourseType.audio
+                    : CourseType.video,
+                packageRoot: c.packageRoot,
+                firstSentenceId: c.firstSentenceId,
+              ),
+            )
+            .toList()
+        : mockCourses;
+    final warning = localCoursesAsync.isLoading || hasLocalCourses
+        ? null
+        : '未发现本地课程包，已回退到示例课程。';
+
     // Basic filter logic (mock)
     final filteredCourses = _selectedCategoryIndex == 0
-        ? mockCourses
+        ? courses
         : _selectedCategoryIndex == 2 // Video
-            ? mockCourses.where((c) => c.type == CourseType.video).toList()
+            ? courses.where((c) => c.type == CourseType.video).toList()
             : _selectedCategoryIndex == 3 // Book
-                ? mockCourses.where((c) => c.type == CourseType.book).toList()
-                : mockCourses; // Fallback for others
+                ? courses.where((c) => c.type == CourseType.book).toList()
+                : courses; // Fallback for others
 
     return SafeArea(
       child: Container(
@@ -205,6 +224,20 @@ class _CourseSelectionScreenState extends State<CourseSelectionScreen> {
 
               const SizedBox(height: 24),
 
+              if (warning != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Text(
+                    warning,
+                    style: TextStyle(
+                      color: Colors.orange.withOpacity(0.8),
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+
+              if (warning != null) const SizedBox(height: 8),
+
               // Count
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -227,30 +260,34 @@ class _CourseSelectionScreenState extends State<CourseSelectionScreen> {
 
               // Grid
               Expanded(
-                child: GridView.builder(
-                  padding: EdgeInsets.only(
-                    left: 20,
-                    right: 20,
-                    top: 10,
-                    bottom: MediaQuery.of(context).padding.bottom + 20,
-                  ),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 0.65, // Taller cards
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 20,
-                  ),
-                  itemCount: filteredCourses.length,
-                  itemBuilder: (context, index) {
-                    return GestureDetector(
-                      onTap: () async {
-                        await context.push(Routes.courseDetail,
-                            extra: filteredCourses[index]);
-                      },
-                      child: _buildCourseCard(filteredCourses[index]),
-                    );
-                  },
-                ),
+                child: localCoursesAsync.isLoading
+                    ? const Center(
+                        child: CircularProgressIndicator(color: kAccentColor))
+                    : GridView.builder(
+                        padding: EdgeInsets.only(
+                          left: 20,
+                          right: 20,
+                          top: 10,
+                          bottom: MediaQuery.of(context).padding.bottom + 20,
+                        ),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          childAspectRatio: 0.65, // Taller cards
+                          crossAxisSpacing: 16,
+                          mainAxisSpacing: 20,
+                        ),
+                        itemCount: filteredCourses.length,
+                        itemBuilder: (context, index) {
+                          return GestureDetector(
+                            onTap: () async {
+                              await context.push(Routes.courseDetail,
+                                  extra: filteredCourses[index]);
+                            },
+                            child: _buildCourseCard(filteredCourses[index]),
+                          );
+                        },
+                      ),
               ),
             ],
           ),

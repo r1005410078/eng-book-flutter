@@ -19,9 +19,9 @@ Use explicit step commands for AI stages:
 
 ## HITL Override Files
 When `translate`, `grammar`, `summary` step runs, the pipeline generates input files under:
-- `runtime/tasks/<task_id>/hitl/*_translate_input.json`
-- `runtime/tasks/<task_id>/hitl/*_grammar_input.json`
-- `runtime/tasks/<task_id>/hitl/*_summary_input.json`
+- `.runtime/tasks/<task_id>/hitl/*_translate_input.json`
+- `.runtime/tasks/<task_id>/hitl/*_grammar_input.json`
+- `.runtime/tasks/<task_id>/hitl/*_summary_input.json`
 
 To provide manual AI output, write one of these optional files before re-running a step:
 - `*_translate_output.json`

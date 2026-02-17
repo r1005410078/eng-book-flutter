@@ -6,6 +6,12 @@ class SentenceDetail {
   final Map<String, String> grammarNotes;
   final Duration startTime;
   final Duration endTime;
+  final String? lessonId;
+  final String? lessonTitle;
+  final String? mediaType;
+  final String? mediaPath;
+  final String? courseTitle;
+  final String? packageRoot;
 
   const SentenceDetail({
     required this.id,
@@ -15,5 +21,11 @@ class SentenceDetail {
     required this.grammarNotes,
     required this.startTime,
     required this.endTime,
+    this.lessonId,
+    this.lessonTitle,
+    this.mediaType,
+    this.mediaPath,
+    this.courseTitle,
+    this.packageRoot,
   });
 }

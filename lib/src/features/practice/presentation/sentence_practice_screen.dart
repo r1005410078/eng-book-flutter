@@ -1,9 +1,13 @@
 import 'dart:async'; // Import dart:async
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:video_player/video_player.dart';
+import '../application/local_course_provider.dart';
+import '../data/local_course_package_loader.dart';
 import '../data/mock_data.dart';
 import '../domain/sentence_detail.dart';
 import '../../../routing/routes.dart';
@@ -11,10 +15,14 @@ import 'widgets/practice_controls.dart'; // Import PracticeControls widget
 
 class SentencePracticeScreen extends ConsumerStatefulWidget {
   final String sentenceId;
+  final String? packageRoot;
+  final String? courseTitle;
 
   const SentencePracticeScreen({
     super.key,
     required this.sentenceId,
+    this.packageRoot,
+    this.courseTitle,
   });
 
   @override
@@ -25,12 +33,23 @@ class SentencePracticeScreen extends ConsumerStatefulWidget {
 class _SentencePracticeScreenState
     extends ConsumerState<SentencePracticeScreen> {
   // Data
-  final List<SentenceDetail> _sentences = mockSentences;
+  List<SentenceDetail> _sentences = [];
   int _currentIndex = 0;
+  bool _isLoading = true;
+  String? _loadWarning;
+  String? _currentPackageRoot;
+  String? _currentCourseTitle;
+  String? _currentMediaPath;
 
   bool _isTranslationVisible = false;
   late VideoPlayerController _videoController;
-  // late AudioPlayer _audioPlayer; // Not using separate audio - using video audio
+  late AudioPlayer _audioPlayer;
+  StreamSubscription<Duration>? _audioPositionSub;
+  StreamSubscription<PlayerState>? _audioStateSub;
+  StreamSubscription<Duration?>? _audioDurationSub;
+  Duration _audioPosition = Duration.zero;
+  Duration _audioDuration = Duration.zero;
+  bool _isAudioMode = false;
   // Controls Visibility State
   bool _isPlaying = false;
   bool _isRecording = false;
@@ -47,40 +66,212 @@ class _SentencePracticeScreenState
   @override
   void initState() {
     super.initState();
-    // Initialize current index based on sentenceId if needed, defaulting to 0
-    // _currentIndex = _sentences.indexWhere((s) => s.id == widget.sentenceId);
-    // if (_currentIndex == -1) _currentIndex = 0;
-
-    // Video setup
+    _audioPlayer = AudioPlayer();
+    _audioPositionSub = _audioPlayer.positionStream.listen((pos) {
+      _audioPosition = pos;
+      _syncSentenceWithAudio(pos);
+      if (mounted) setState(() {});
+    });
+    _audioStateSub = _audioPlayer.playerStateStream.listen((state) {
+      if (!mounted || !_isAudioMode) return;
+      setState(() {
+        _isPlaying = state.playing;
+      });
+    });
+    _audioDurationSub = _audioPlayer.durationStream.listen((duration) {
+      _audioDuration = duration ?? Duration.zero;
+      if (mounted && _isAudioMode) setState(() {});
+    });
     _videoController = VideoPlayerController.networkUrl(
       Uri.parse(
           'https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4'),
-    )..initialize().then((_) {
-        setState(() {});
-        // _videoController.play(); // Auto-play disabled to test controls
-        _videoController.setLooping(true);
-        // Turn on listener for progress
-        _videoController.addListener(_syncSentenceWithVideo);
-      });
-
-    // Audio Player setup (using video audio instead)
-    // _audioPlayer = AudioPlayer();
-    // _initAudio();
-
-    // Waveform Controller Setup (removed)
-    // if (!kIsWeb) {
-    //   _waveformController = PlayerController();
-    //   _prepareWaveform();
-    // }
-
-    // Start timer initially if playing (optional, here we start visible)
+    );
+    _initializeContent();
     _startHideTimer();
+  }
+
+  Future<void> _initializeContent() async {
+    const definedRoot = String.fromEnvironment(
+      'COURSE_PACKAGE_DIR',
+      defaultValue: '',
+    );
+    final discoveredRoot = await discoverLatestReadyPackageRoot();
+    final providerRoot = ref.read(localCourseContextProvider)?.packageRoot;
+    final packageRoot = widget.packageRoot ??
+        providerRoot ??
+        (definedRoot.isNotEmpty ? definedRoot : discoveredRoot ?? '');
+    final courseTitleInput =
+        widget.courseTitle ?? ref.read(localCourseContextProvider)?.courseTitle;
+
+    if (packageRoot.isNotEmpty) {
+      ref.read(localCourseContextProvider.notifier).state = LocalCourseContext(
+        packageRoot: packageRoot,
+        courseTitle: courseTitleInput,
+      );
+    }
+
+    final loaded = await ref.read(localCourseSentencesProvider.future);
+    var list = loaded.sentences;
+    var warning = loaded.warning;
+
+    if (list.isEmpty) {
+      list = mockSentences;
+      warning ??= '本地课程包未就绪，已回退到默认内容。';
+    }
+
+    final index = list.indexWhere((s) => s.id == widget.sentenceId);
+    final targetIndex = index != -1 ? index : 0;
+    final mediaPath = list[targetIndex].mediaPath;
+    final mediaType = list[targetIndex].mediaType;
+    final courseTitle =
+        courseTitleInput ?? list[targetIndex].courseTitle ?? '本地课程';
+
+    await _switchMedia(
+      mediaPath,
+      mediaType: mediaType,
+      seekTo: list[targetIndex].startTime,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _sentences = list;
+      _currentIndex = targetIndex;
+      _isLoading = false;
+      _loadWarning = warning;
+      _currentPackageRoot = packageRoot.isEmpty ? null : packageRoot;
+      _currentCourseTitle = courseTitle;
+    });
+  }
+
+  Future<void> _switchMedia(
+    String? mediaPath, {
+    String? mediaType,
+    Duration? seekTo,
+  }) async {
+    final path = (mediaPath ?? '').trim();
+    final lowerPath = path.toLowerCase();
+    final useAudio = (mediaType ?? '').toLowerCase() == 'audio' ||
+        lowerPath.endsWith('.mp3') ||
+        lowerPath.endsWith('.aac') ||
+        lowerPath.endsWith('.wav') ||
+        lowerPath.endsWith('.m4a');
+
+    if (path.isEmpty) {
+      await _initFallbackVideo(seekTo: seekTo);
+      return;
+    }
+
+    if (_currentMediaPath == path) {
+      if (_isAudioMode) {
+        if (seekTo != null) {
+          await _audioPlayer.seek(seekTo);
+        }
+        return;
+      }
+      if (_videoController.value.isInitialized) {
+        if (seekTo != null) {
+          await _videoController.seekTo(seekTo);
+        }
+        return;
+      }
+    }
+
+    if (useAudio) {
+      try {
+        if (_videoController.value.isInitialized) {
+          await _videoController.pause();
+        }
+        await _audioPlayer.setFilePath(path);
+        _audioDuration = _audioPlayer.duration ?? Duration.zero;
+        await _audioPlayer.setVolume(_volume);
+        await _audioPlayer.setSpeed(_playbackSpeed);
+        if (seekTo != null) {
+          await _audioPlayer.seek(seekTo);
+        }
+        if (_isPlaying) {
+          await _audioPlayer.play();
+        }
+        if (mounted) {
+          setState(() {
+            _isAudioMode = true;
+            _currentMediaPath = path;
+          });
+        } else {
+          _isAudioMode = true;
+          _currentMediaPath = path;
+        }
+      } catch (_) {
+        if (mounted) {
+          setState(() {
+            _loadWarning = '本地音频加载失败，已保留当前播放器。';
+          });
+        }
+      }
+      return;
+    }
+
+    final old = _videoController;
+    old.removeListener(_syncSentenceWithVideo);
+    try {
+      final next = VideoPlayerController.file(File(path));
+      await next.initialize();
+      await next.setLooping(true);
+      await next.setVolume(_volume);
+      await next.setPlaybackSpeed(_playbackSpeed);
+      next.addListener(_syncSentenceWithVideo);
+      if (seekTo != null) {
+        await next.seekTo(seekTo);
+      }
+      if (_isPlaying) {
+        await next.play();
+      }
+
+      if (mounted) {
+        setState(() {
+          _isAudioMode = false;
+          _videoController = next;
+          _currentMediaPath = path;
+        });
+      } else {
+        _isAudioMode = false;
+        _videoController = next;
+        _currentMediaPath = path;
+      }
+      await old.dispose();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loadWarning = '本地媒体加载失败，已保留当前播放器。';
+        });
+      }
+    }
+  }
+
+  Future<void> _initFallbackVideo({Duration? seekTo}) async {
+    if (_videoController.value.isInitialized) return;
+    try {
+      await _videoController.initialize();
+      await _videoController.setLooping(true);
+      await _videoController.setVolume(_volume);
+      await _videoController.setPlaybackSpeed(_playbackSpeed);
+      _videoController.addListener(_syncSentenceWithVideo);
+      if (seekTo != null) {
+        await _videoController.seekTo(seekTo);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loadWarning = '默认播放器初始化失败。';
+        });
+      }
+    }
   }
 
   // Waveform preparation removed
   // Future<void> _prepareWaveform() async { ... }
 
   void _syncSentenceWithVideo() {
+    if (_isAudioMode) return;
     if (!_videoController.value.isInitialized) return;
 
     final currentPos = _videoController.value.position;
@@ -94,7 +285,6 @@ class _SentencePracticeScreenState
           debugPrint("Scrub sync: Jumped to sentence $i at $currentPos");
           setState(() {
             _currentIndex = i;
-            _isTranslationVisible = false;
           });
         }
         break;
@@ -102,43 +292,33 @@ class _SentencePracticeScreenState
     }
   }
 
-  Future<void> _initAudio() async {
-    // Using video audio instead of separate audio player
-    // Audio is handled by VideoPlayerController
-    return;
-    /*
-    try {
-      // Mock audio loading. Replace with actual URL from _sentence or equivalent
-      await _audioPlayer.setUrl(
-          'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3');
-      // Listen to player state
-      _audioPlayer.playerStateStream.listen((state) {
-        // If playing state changed
-        if (_isPlaying != state.playing) {
+  void _syncSentenceWithAudio(Duration currentPos) {
+    if (!_isAudioMode) return;
+    for (int i = 0; i < _sentences.length; i++) {
+      final s = _sentences[i];
+      if (currentPos >= s.startTime && currentPos < s.endTime) {
+        if (_currentIndex != i && mounted) {
           setState(() {
-            _isPlaying = state.playing;
+            _currentIndex = i;
           });
-          if (_isPlaying) {
-            _startHideTimer();
-          } else {
-            _cancelHideTimer();
-            setState(() => _controlsVisible = true); // Always show when paused
-          }
         }
-      });
-    } catch (e) {
-      debugPrint("Error loading audio: $e");
+        break;
+      }
     }
-    */
   }
 
   @override
   void dispose() {
     _cancelHideTimer();
     // _stopWaveformSync(); // Waveform removed
-    _videoController.removeListener(_syncSentenceWithVideo);
+    if (_videoController.value.isInitialized) {
+      _videoController.removeListener(_syncSentenceWithVideo);
+    }
     _videoController.dispose();
-    // _audioPlayer.dispose(); // Not using separate audio player
+    _audioPositionSub?.cancel();
+    _audioStateSub?.cancel();
+    _audioDurationSub?.cancel();
+    _audioPlayer.dispose();
     // _waveformController?.dispose(); // Waveform removed
     super.dispose();
   }
@@ -176,14 +356,19 @@ class _SentencePracticeScreenState
   }
 
   void _togglePlay() {
-    if (_isPlaying) {
-      // _audioPlayer.pause();
-      _videoController.pause();
-      // Waveform removed
+    if (_isAudioMode) {
+      if (_isPlaying) {
+        _audioPlayer.pause();
+      } else {
+        _audioPlayer.play();
+      }
     } else {
-      // _audioPlayer.play();
-      _videoController.play();
-      // Waveform removed
+      if (!_videoController.value.isInitialized) return;
+      if (_isPlaying) {
+        _videoController.pause();
+      } else {
+        _videoController.play();
+      }
     }
     // _isPlaying state is updated by listener, but for immediate UI feedback:
     setState(() {
@@ -233,21 +418,38 @@ class _SentencePracticeScreenState
     _onUserInteraction();
   }
 
-  void _seekToSentence(int index) {
+  Future<void> _seekToSentence(int index) async {
     final s = _sentences[index];
-    _videoController.seekTo(s.startTime);
+    setState(() {
+      _currentIndex = index;
+    });
+    await _switchMedia(
+      s.mediaPath,
+      mediaType: s.mediaType,
+      seekTo: s.startTime,
+    );
+    if (_isAudioMode) {
+      await _audioPlayer.seek(s.startTime);
+    } else if (_videoController.value.isInitialized) {
+      await _videoController.seekTo(s.startTime);
+    }
     // _audioPlayer.seek(s.startTime); // Not using separate audio
     // Waveform removed
   }
 
   void _handleReplay5s() {
-    // Seek back 5 seconds
-    final position =
-        _videoController.value.position - const Duration(seconds: 5);
+    final currentPosition = _isAudioMode
+        ? _audioPlayer.position
+        : (_videoController.value.isInitialized
+            ? _videoController.value.position
+            : Duration.zero);
+    final position = currentPosition - const Duration(seconds: 5);
     final newPos = position < Duration.zero ? Duration.zero : position;
-    // _audioPlayer.seek(newPos); // Not using separate audio
-    _videoController.seekTo(newPos); // Sync video
-    // Waveform removed
+    if (_isAudioMode) {
+      _audioPlayer.seek(newPos);
+    } else if (_videoController.value.isInitialized) {
+      _videoController.seekTo(newPos);
+    }
     _onUserInteraction();
   }
 
@@ -262,8 +464,11 @@ class _SentencePracticeScreenState
       _volume = value;
       _previousVolume = value > 0 ? value : _previousVolume;
     });
-    _videoController.setVolume(value);
-    // _audioPlayer.setVolume(value); // Not using separate audio
+    if (_isAudioMode) {
+      _audioPlayer.setVolume(value);
+    } else if (_videoController.value.isInitialized) {
+      _videoController.setVolume(value);
+    }
     _onUserInteraction();
   }
 
@@ -280,8 +485,11 @@ class _SentencePracticeScreenState
     setState(() {
       _playbackSpeed = speed;
     });
-    _videoController.setPlaybackSpeed(speed);
-    // _audioPlayer.setSpeed(speed); // Not using separate audio
+    if (_isAudioMode) {
+      _audioPlayer.setSpeed(speed);
+    } else if (_videoController.value.isInitialized) {
+      _videoController.setPlaybackSpeed(speed);
+    }
     _onUserInteraction();
   }
 
@@ -296,6 +504,17 @@ class _SentencePracticeScreenState
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_sentences.isEmpty) {
+      return const Scaffold(
+        body: Center(child: Text('暂无可用句子数据')),
+      );
+    }
+
     // 提取颜色常量
     const accentColor = Color(0xFFFF9F29); // 橙色
     const grammarBgColor = Color(0xFF2A2723);
@@ -331,6 +550,18 @@ class _SentencePracticeScreenState
                     left: 20.0, right: 20.0, bottom: 120.0),
                 child: Column(
                   children: [
+                    if (_loadWarning != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          _loadWarning!,
+                          style: TextStyle(
+                            color: Colors.orange.withOpacity(0.8),
+                            fontSize: 12,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
                     const SizedBox(height: 16),
                     // Video Area
                     _buildVideoArea(),
@@ -462,6 +693,20 @@ class _SentencePracticeScreenState
   }
 
   Widget _buildVideoArea() {
+    final current = _isAudioMode
+        ? _audioPosition
+        : (_videoController.value.isInitialized
+            ? _videoController.value.position
+            : Duration.zero);
+    final total = _isAudioMode
+        ? _audioDuration
+        : (_videoController.value.isInitialized
+            ? _videoController.value.duration
+            : Duration.zero);
+    final progress = total.inMilliseconds <= 0
+        ? 0.0
+        : (current.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0);
+
     return AspectRatio(
       aspectRatio: 16 / 9,
       child: Container(
@@ -473,7 +718,26 @@ class _SentencePracticeScreenState
         child: Stack(
           alignment: Alignment.center,
           children: [
-            if (_videoController.value.isInitialized)
+            if (_isAudioMode)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.audiotrack,
+                        size: 56, color: Color(0xFFFF9F29)),
+                    const SizedBox(height: 16),
+                    LinearProgressIndicator(
+                      value: progress,
+                      minHeight: 4,
+                      backgroundColor: Colors.white24,
+                      valueColor:
+                          const AlwaysStoppedAnimation(Color(0xFFFF9F29)),
+                    ),
+                  ],
+                ),
+              )
+            else if (_videoController.value.isInitialized)
               VideoPlayer(_videoController)
             else
               const Center(
@@ -542,16 +806,24 @@ class _SentencePracticeScreenState
                             borderRadius: BorderRadius.circular(4),
                             child: SizedBox(
                               height: 4,
-                              child: VideoProgressIndicator(
-                                _videoController,
-                                allowScrubbing: true,
-                                colors: const VideoProgressColors(
-                                  playedColor: Color(0xFFFF9F29),
-                                  bufferedColor: Colors.white24,
-                                  backgroundColor: Colors.white10,
-                                ),
-                                padding: EdgeInsets.zero,
-                              ),
+                              child: _isAudioMode
+                                  ? LinearProgressIndicator(
+                                      value: progress,
+                                      minHeight: 4,
+                                      backgroundColor: Colors.white24,
+                                      valueColor: const AlwaysStoppedAnimation(
+                                          Color(0xFFFF9F29)),
+                                    )
+                                  : VideoProgressIndicator(
+                                      _videoController,
+                                      allowScrubbing: true,
+                                      colors: const VideoProgressColors(
+                                        playedColor: Color(0xFFFF9F29),
+                                        bufferedColor: Colors.white24,
+                                        backgroundColor: Colors.white10,
+                                      ),
+                                      padding: EdgeInsets.zero,
+                                    ),
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -591,8 +863,18 @@ class _SentencePracticeScreenState
   }
 
   Widget _buildVideoControlBar() {
-    final currentPosStr = _formatDuration(_videoController.value.position);
-    final totalDurStr = _formatDuration(_videoController.value.duration);
+    final currentPos = _isAudioMode
+        ? _audioPosition
+        : (_videoController.value.isInitialized
+            ? _videoController.value.position
+            : Duration.zero);
+    final totalDur = _isAudioMode
+        ? _audioDuration
+        : (_videoController.value.isInitialized
+            ? _videoController.value.duration
+            : Duration.zero);
+    final currentPosStr = _formatDuration(currentPos);
+    final totalDurStr = _formatDuration(totalDur);
 
     return Row(
       children: [
@@ -805,9 +1087,9 @@ class _SentencePracticeScreenState
           Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                "Friends S01E01",
-                style: TextStyle(
+              Text(
+                _currentCourseTitle ?? '本地课程',
+                style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
@@ -830,7 +1112,12 @@ class _SentencePracticeScreenState
                 color: Colors.white, size: 22),
             onPressed: () {
               final currentId = _sentences[_currentIndex].id;
-              context.push('/practice/reading/$currentId');
+              final basePath = '/practice/reading/$currentId';
+              final package = _currentPackageRoot;
+              final route = package == null || package.isEmpty
+                  ? basePath
+                  : '$basePath?package=${Uri.encodeComponent(package)}&course=${Uri.encodeComponent(_currentCourseTitle ?? '')}';
+              context.push(route);
             },
           ),
         ],

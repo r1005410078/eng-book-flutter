@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../../routing/routes.dart';
+import '../../practice/data/local_course_package_loader.dart';
 import 'course_selection_screen.dart';
 
 // --- Constants ---
@@ -67,6 +68,26 @@ final List<LearningNode> mockNodes = [
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
+
+  Future<void> _startLearningFromLocalCourse(
+      BuildContext context, String fallbackId) async {
+    final localCourses = await listLocalCoursePackages();
+    if (localCourses.isEmpty) {
+      if (context.mounted) {
+        context.push(Routes.sentencePractice.replaceFirst(':id', fallbackId));
+      }
+      return;
+    }
+
+    final first = localCourses.first;
+    final basePath =
+        Routes.sentencePractice.replaceFirst(':id', first.firstSentenceId);
+    final route =
+        '$basePath?package=${Uri.encodeComponent(first.packageRoot)}&course=${Uri.encodeComponent(first.title)}';
+    if (context.mounted) {
+      context.push(route);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -381,8 +402,7 @@ class HomeScreen extends StatelessWidget {
 
             // Main Circle Button
             GestureDetector(
-              onTap: () => context
-                  .push(Routes.sentencePractice.replaceFirst(':id', node.id)),
+              onTap: () => _startLearningFromLocalCourse(context, node.id),
               child: Container(
                 margin: const EdgeInsets.only(
                     top: 25), // Center relative to largest glow

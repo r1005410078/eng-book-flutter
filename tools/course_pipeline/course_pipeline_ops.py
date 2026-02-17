@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -9,6 +10,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from shutil import which
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 STATUSES = {"uploaded", "processing", "paused", "ready", "failed", "stopped"}
 STEP_ORDER = ["ffmpeg", "asr", "align", "translate", "grammar", "summary", "package"]
@@ -16,6 +19,8 @@ STEP_STATES = {"pending", "running", "done", "failed"}
 HITL_STEPS = {"translate", "grammar", "summary"}
 TERMINAL_STATUSES = {"ready", "failed", "stopped"}
 MEDIA_PATTERN = re.compile(r"^(\d{2})_.*\.(mp4|mp3)$", re.IGNORECASE)
+WORD_PATTERN = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
+IPA_CACHE: dict[str, str | None] = {}
 
 
 def now_iso() -> str:
@@ -28,7 +33,7 @@ def out(payload: dict, code: int = 0) -> int:
 
 
 def project_runtime_dir(project_root: Path) -> Path:
-    d = project_root / "runtime" / "tasks"
+    d = project_root / ".runtime" / "tasks"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -101,6 +106,109 @@ def ffprobe_duration_ms(media_file: Path) -> int:
     return int(seconds * 1000)
 
 
+def extract_embedded_subtitle_to_srt(media_file: Path, out_srt: Path) -> tuple[bool, str]:
+    """Try extracting embedded subtitle stream from media into SRT.
+
+    Returns (ok, source_tag).
+    """
+    probe_cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "s",
+        "-show_entries",
+        "stream=index:stream_tags=language",
+        "-of",
+        "json",
+        str(media_file),
+    ]
+    probe = subprocess.run(probe_cmd, check=False, capture_output=True, text=True)
+    if probe.returncode != 0:
+        return False, "embedded_probe_failed"
+
+    try:
+        payload = json.loads(probe.stdout or "{}")
+        streams = payload.get("streams", [])
+    except Exception:
+        return False, "embedded_probe_parse_failed"
+
+    if not streams:
+        return False, "embedded_not_found"
+
+    selected = None
+    for s in streams:
+        lang = str(((s.get("tags") or {}).get("language") or "")).lower()
+        if lang.startswith("en"):
+            selected = s
+            break
+    if selected is None:
+        selected = streams[0]
+
+    idx = selected.get("index")
+    if idx is None:
+        return False, "embedded_index_missing"
+
+    extract_cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(media_file),
+        "-map",
+        f"0:{idx}",
+        str(out_srt),
+    ]
+    extract = subprocess.run(extract_cmd, check=False, capture_output=True, text=True)
+    if extract.returncode != 0 or not out_srt.exists() or not out_srt.read_text(encoding="utf-8", errors="ignore").strip():
+        return False, "embedded_extract_failed"
+    return True, "embedded"
+
+
+def transcribe_with_whisper_to_srt(audio_file: Path, out_srt: Path) -> tuple[bool, str]:
+    whisper_bin = which("whisper")
+    if whisper_bin is None:
+        return False, "whisper_not_found"
+
+    model = os.getenv("COURSE_PIPELINE_WHISPER_MODEL", "base")
+    device = os.getenv("COURSE_PIPELINE_WHISPER_DEVICE", "").strip()
+    output_dir = out_srt.parent / ".whisper"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        whisper_bin,
+        str(audio_file),
+        "--task",
+        "transcribe",
+        "--language",
+        "en",
+        "--output_format",
+        "srt",
+        "--output_dir",
+        str(output_dir),
+        "--model",
+        model,
+        "--verbose",
+        "False",
+    ]
+    if device:
+        cmd.extend(["--device", device])
+
+    run = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    if run.returncode != 0:
+        return False, "whisper_failed"
+
+    generated_srt = output_dir / f"{audio_file.stem}.srt"
+    if not generated_srt.exists():
+        return False, "whisper_output_missing"
+
+    text = generated_srt.read_text(encoding="utf-8", errors="ignore").strip()
+    if not text:
+        return False, "whisper_output_empty"
+
+    out_srt.write_text(text + "\n", encoding="utf-8")
+    return True, "whisper_local"
+
+
 def write_srt(path: Path, entries: list[dict]) -> None:
     def format_ms(ms: int) -> str:
         h = ms // 3600000
@@ -156,6 +264,184 @@ def parse_srt(path: Path) -> list[dict]:
     return items
 
 
+def is_pending_text(text: str) -> bool:
+    value = (text or "").strip().lower()
+    if not value:
+        return True
+    markers = [
+        "[asr pending]",
+        "[zh pending]",
+        "[pending]",
+        "[待补充]",
+        "【待翻译】",
+    ]
+    return any(marker in value for marker in markers)
+
+
+def translate_en_to_zh_ai(text: str) -> str | None:
+    value = (text or "").strip()
+    if not value or is_pending_text(value):
+        return None
+    timeout = float(os.getenv("COURSE_PIPELINE_TRANSLATE_TIMEOUT", "10"))
+    endpoint = (
+        "https://translate.googleapis.com/translate_a/single"
+        f"?client=gtx&sl=en&tl=zh-CN&dt=t&q={quote(value)}"
+    )
+    req = Request(endpoint, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
+        rows = payload[0] if isinstance(payload, list) and payload else []
+        translated = "".join(str(row[0]) for row in rows if isinstance(row, list) and row and row[0])
+        translated = translated.strip()
+        return translated or None
+    except Exception:
+        return None
+
+
+def is_pending_ipa(value: str) -> bool:
+    text = (value or "").strip().lower()
+    if not text:
+        return True
+    return "[pending]" in text or "[ipa pending]" in text
+
+
+def fetch_word_ipa(word: str) -> str | None:
+    key = (word or "").strip().lower()
+    if not key:
+        return None
+    if key in IPA_CACHE:
+        return IPA_CACHE[key]
+
+    timeout = float(os.getenv("COURSE_PIPELINE_IPA_TIMEOUT", "8"))
+    endpoint = f"https://api.dictionaryapi.dev/api/v2/entries/en/{quote(key)}"
+    req = Request(endpoint, headers={"User-Agent": "Mozilla/5.0"})
+    ipa: str | None = None
+    try:
+        with urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8", errors="ignore"))
+        if isinstance(payload, list) and payload:
+            first = payload[0] if isinstance(payload[0], dict) else {}
+            phonetic = first.get("phonetic")
+            if isinstance(phonetic, str) and phonetic.strip():
+                ipa = phonetic.strip()
+            if not ipa:
+                for row in first.get("phonetics", []):
+                    if not isinstance(row, dict):
+                        continue
+                    text = row.get("text")
+                    if isinstance(text, str) and text.strip():
+                        ipa = text.strip()
+                        break
+    except Exception:
+        ipa = None
+
+    IPA_CACHE[key] = ipa
+    return ipa
+
+
+def generate_sentence_ipa(en: str) -> str:
+    text = (en or "").strip()
+    if not text:
+        return "[pending]"
+
+    has_ipa = False
+    parts: list[str] = []
+    for token in text.split():
+        matched = WORD_PATTERN.fullmatch(token.strip(".,!?;:\"()[]{}"))
+        if not matched:
+            parts.append(token)
+            continue
+        ipa = fetch_word_ipa(matched.group(0))
+        if ipa:
+            parts.append(ipa)
+            has_ipa = True
+        else:
+            parts.append(token)
+
+    if not has_ipa:
+        return "[pending]"
+    return " ".join(parts)
+
+
+def infer_grammar(en: str) -> dict:
+    text = (en or "").strip()
+    low = text.lower()
+    points: list[str] = []
+
+    if "?" in text:
+        pattern = "疑问句结构"
+        points.append("使用直接提问句式。")
+    elif "!" in text:
+        pattern = "感叹句结构"
+        points.append("表达强调或强烈情绪。")
+    elif any(k in low for k in ["have ", "has ", "had "]):
+        pattern = "完成时表达"
+        points.append("用完成时连接过去与现在。")
+    elif any(k in low for k in [" was ", " were ", " did ", " went ", "got "]):
+        pattern = "一般过去时"
+        points.append("描述已经完成的过去事件。")
+    elif any(k in low for k in [" will ", "going to "]):
+        pattern = "将来表达"
+        points.append("描述将来的计划或预测。")
+    else:
+        pattern = "陈述句结构"
+        points.append("使用常见主谓结构表达信息。")
+
+    if any(k in low for k in ["because", "when", "if", "that", "which"]):
+        points.append("包含从句连接词，补充细节信息。")
+    if any(k in low for k in ["very", "really", "quite", "so "]):
+        points.append("包含程度副词用于加强语气。")
+
+    difficulty = "A2" if len(text.split()) > 10 else "A1"
+    return {"pattern": pattern, "points": points[:3], "difficulty": difficulty}
+
+
+def infer_usage(en: str, zh: str) -> dict:
+    low = (en or "").lower()
+    if any(k in low for k in ["hello", "welcome", "hi"]):
+        scene = "greeting"
+        tone = "friendly"
+    elif any(k in low for k in ["train", "station", "walk", "woods", "town"]):
+        scene = "daily_life_narration"
+        tone = "neutral"
+    elif "?" in (en or ""):
+        scene = "questioning"
+        tone = "curious"
+    else:
+        scene = "daily_conversation"
+        tone = "neutral"
+    return {
+        "scene": scene,
+        "tone": tone,
+        "formality": "informal",
+        "alternatives": [zh] if zh else [],
+        "caution": "",
+    }
+
+
+def generate_summary_and_highlights(sentences: list[dict]) -> tuple[str, list[str]]:
+    zh_texts = [str(s.get("zh", "")).strip() for s in sentences if str(s.get("zh", "")).strip()]
+    en_texts = [str(s.get("en", "")).strip() for s in sentences if str(s.get("en", "")).strip()]
+
+    preview = "；".join(zh_texts[:3]) if zh_texts else "；".join(en_texts[:2])
+    if not preview:
+        preview = "本课涵盖基础日常表达。"
+    summary = f"本课重点围绕日常表达与叙事句型，核心内容包括：{preview}。"
+
+    highlights: list[str] = []
+    all_en = " ".join(en_texts).lower()
+    if any(k in all_en for k in [" was ", " were ", " did ", "went ", "got "]):
+        highlights.append("一般过去时叙事表达")
+    if any(k in all_en for k in ["because", "which", "that", "when", "if"]):
+        highlights.append("从句连接词与句子扩展")
+    if any(k in all_en for k in ["?", "!"]):
+        highlights.append("疑问/感叹语气表达")
+    if not highlights:
+        highlights.append("基础陈述句与高频词汇表达")
+    return summary, highlights[:3]
+
+
 def execute_step_ffmpeg(task: dict, runtime_dir: Path) -> dict:
     if which("ffmpeg") is None or which("ffprobe") is None:
         raise RuntimeError("FFMPEG_NOT_FOUND")
@@ -173,15 +459,45 @@ def execute_step_ffmpeg(task: dict, runtime_dir: Path) -> dict:
         lesson_dir.mkdir(parents=True, exist_ok=True)
 
         ext = media.suffix.lower().lstrip(".")
-        normalized_media = lesson_dir / f"media.{ext}"
-        normalized_media.write_bytes(media.read_bytes())
+        # Normalize video to iOS-friendly H.264/AAC to avoid green frames/artifacts.
+        if ext == "mp4":
+            normalized_media = lesson_dir / "media.mp4"
+            normalize_cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(media),
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-profile:v",
+                "high",
+                "-level:v",
+                "4.1",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "22",
+                "-movflags",
+                "+faststart",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                str(normalized_media),
+            ]
+            subprocess.run(normalize_cmd, check=True, capture_output=True, text=True)
+        else:
+            normalized_media = lesson_dir / f"media.{ext}"
+            normalized_media.write_bytes(media.read_bytes())
 
         wav_path = lesson_dir / "audio_16k.wav"
         cmd = [
             "ffmpeg",
             "-y",
             "-i",
-            str(media),
+            str(normalized_media),
             "-ac",
             "1",
             "-ar",
@@ -189,7 +505,7 @@ def execute_step_ffmpeg(task: dict, runtime_dir: Path) -> dict:
             str(wav_path),
         ]
         subprocess.run(cmd, check=True, capture_output=True, text=True)
-        duration_ms = ffprobe_duration_ms(media)
+        duration_ms = ffprobe_duration_ms(normalized_media)
         lessons.append(
             {
                 "lesson_id": key,
@@ -212,22 +528,31 @@ def execute_step_asr(task: dict, runtime_dir: Path) -> dict:
         lesson_dir.mkdir(parents=True, exist_ok=True)
         provided_en = raw_folder / f"{key}.en.srt"
         out_en = lesson_dir / "sub_en.srt"
+        media_mp4 = lesson_dir / "media.mp4"
         if provided_en.exists():
             out_en.write_text(provided_en.read_text(encoding="utf-8"), encoding="utf-8")
             source = "provided"
         else:
-            # Placeholder ASR output for MVP skeleton.
-            write_srt(
-                out_en,
-                [
-                    {
-                        "start_ms": 0,
-                        "end_ms": 3000,
-                        "text": "[ASR pending] Please replace with real transcript.",
-                    }
-                ],
-            )
             source = "placeholder"
+            extracted = False
+            if media_mp4.exists():
+                extracted, source = extract_embedded_subtitle_to_srt(media_mp4, out_en)
+            if not extracted:
+                audio_16k = lesson_dir / "audio_16k.wav"
+                if audio_16k.exists():
+                    extracted, source = transcribe_with_whisper_to_srt(audio_16k, out_en)
+                if not extracted:
+                    # Placeholder ASR output for MVP skeleton.
+                    write_srt(
+                        out_en,
+                        [
+                            {
+                                "start_ms": 0,
+                                "end_ms": 3000,
+                                "text": "[ASR pending] Please replace with real transcript.",
+                            }
+                        ],
+                    )
         lessons.append({"lesson_id": key, "sub_en": str(out_en), "source": source})
 
     return {"lessons": lessons}
@@ -300,20 +625,47 @@ def execute_step_translate(task: dict, runtime_dir: Path) -> dict:
             out_items = result.get("sentences", input_items)
             source = "hitl_override"
         else:
+            has_real_transcript = any(not is_pending_text(item.get("en", "")) for item in input_items)
+            if not has_real_transcript:
+                raise RuntimeError(f"ASR_NOT_READY:{key}")
             out_items = []
+            ai_translated = 0
             for item in input_items:
+                existing_zh = item.get("zh", "")
+                ai_zh = None
+                if is_pending_text(existing_zh):
+                    ai_zh = translate_en_to_zh_ai(item.get("en", ""))
+                    if ai_zh:
+                        ai_translated += 1
                 out_items.append(
                     {
                         **item,
-                        "zh": item["zh"] if item["zh"] else f"[ZH pending] {item['en']}",
+                        "zh": ai_zh or (f"【待翻译】{item['en']}" if is_pending_text(existing_zh) else existing_zh),
+                        "ipa": generate_sentence_ipa(item.get("en", "")),
                     }
                 )
-            source = "fallback"
+            source = "ai_online" if ai_translated > 0 else "fallback"
+
+        for item in out_items:
+            if is_pending_ipa(item.get("ipa", "")):
+                item["ipa"] = generate_sentence_ipa(item.get("en", ""))
 
         output_file = work_dir / f"{key}_translate_effective.json"
         output_file.write_text(
             json.dumps({"lesson_id": key, "sentences": out_items, "source": source}, ensure_ascii=False, indent=2),
             encoding="utf-8",
+        )
+        # Keep packaged subtitle file consistent with effective translation output.
+        write_srt(
+            lesson_dir / "sub_zh.srt",
+            [
+                {
+                    "start_ms": int(item.get("start_ms", 0)),
+                    "end_ms": int(item.get("end_ms", 0)),
+                    "text": item.get("zh", ""),
+                }
+                for item in out_items
+            ],
         )
         lessons.append({"lesson_id": key, "input_file": str(input_file), "output_file": str(output_file), "source": source})
 
@@ -355,14 +707,16 @@ def execute_step_grammar(task: dict, runtime_dir: Path) -> dict:
         else:
             out_sentences = []
             for s in grammar_input:
+                grammar_obj = infer_grammar(s.get("en", ""))
+                usage_obj = infer_usage(s.get("en", ""), s.get("zh", ""))
                 out_sentences.append(
                     {
                         "sentence_id": s["sentence_id"],
-                        "grammar": {"pattern": "[pending]", "points": ["[pending]"]},
-                        "usage": {"scene": "[pending]", "tone": "neutral", "formality": "informal"},
+                        "grammar": grammar_obj,
+                        "usage": usage_obj,
                     }
                 )
-            source = "fallback"
+            source = "auto_generated"
 
         output_file = work_dir / f"{key}_grammar_effective.json"
         output_file.write_text(
@@ -396,12 +750,13 @@ def execute_step_summary(task: dict, runtime_dir: Path) -> dict:
             summary_data = json.loads(override_file.read_text(encoding="utf-8"))
             source = "hitl_override"
         else:
+            summary, highlights = generate_summary_and_highlights(in_sentences)
             summary_data = {
                 "lesson_id": key,
-                "summary": "[pending] human summary",
-                "grammar_highlights": ["[pending]"],
+                "summary": summary,
+                "grammar_highlights": highlights,
             }
-            source = "fallback"
+            source = "auto_generated"
 
         output_file = work_dir / f"{key}_summary_effective.json"
         output_file.write_text(
@@ -475,8 +830,8 @@ def execute_step_package(task: dict, runtime_dir: Path) -> dict:
                         "caution": usage_obj.get("caution", ""),
                     },
                     "status": {
-                        "translation_ready": True,
-                        "ipa_ready": bool(s.get("ipa")),
+                        "translation_ready": not is_pending_text(s.get("zh", "")),
+                        "ipa_ready": not is_pending_ipa(s.get("ipa", "")),
                         "grammar_ready": grammar_obj.get("pattern", "") != "[pending]",
                         "usage_ready": usage_obj.get("scene", "") != "[pending]",
                     },
@@ -602,7 +957,26 @@ def cmd_course_add(args: argparse.Namespace) -> int:
     }
     save_task(runtime_dir, task)
     append_event(runtime_dir, task_id, "course.add", {"course_path": str(raw_folder), "lessons": lesson_keys})
-    return out({"ok": True, "task": task})
+    if getattr(args, "auto_start", True):
+        code, payload = _run_auto_until_hitl_or_terminal(runtime_dir, task_id)
+        if code != 0:
+            return out(
+                {
+                    "ok": False,
+                    "task": task,
+                    "auto_start": payload,
+                },
+                code,
+            )
+        return out(
+            {
+                "ok": True,
+                "task": payload.get("task", task),
+                "auto_started": True,
+                "auto_executed_steps": payload.get("executed_steps", []),
+            }
+        )
+    return out({"ok": True, "task": task, "auto_started": False, "auto_executed_steps": []})
 
 
 def cmd_course_delete(args: argparse.Namespace) -> int:
@@ -706,59 +1080,58 @@ def cmd_task_retry(args: argparse.Namespace) -> int:
     return out({"ok": True, "task": task})
 
 
-def cmd_task_run_step(args: argparse.Namespace) -> int:
-    runtime_dir = project_runtime_dir(Path(args.project_root).expanduser().resolve())
-    step = args.step
+def _next_incomplete_step(task: dict) -> str | None:
+    for s in STEP_ORDER:
+        if task["steps"].get(s) != "done":
+            return s
+    return None
+
+
+def _run_single_step(runtime_dir: Path, task_id: str, step: str) -> tuple[int, dict]:
     if step not in STEP_ORDER:
-        return out({"ok": False, "error": {"code": "INVALID_STEP", "message": step}}, 2)
+        return 2, {"ok": False, "error": {"code": "INVALID_STEP", "message": step}}
 
     try:
-        task = load_task(runtime_dir, args.task_id)
+        task = load_task(runtime_dir, task_id)
     except FileNotFoundError:
-        return out({"ok": False, "error": {"code": "TASK_NOT_FOUND", "message": args.task_id}}, 2)
+        return 2, {"ok": False, "error": {"code": "TASK_NOT_FOUND", "message": task_id}}
 
     running_steps = [s for s, state in task["steps"].items() if state == "running"]
     if running_steps:
-        return out(
-            {
-                "ok": False,
-                "error": {
-                    "code": "STEP_FAILED",
-                    "message": f"another step is running: {running_steps[0]}",
-                    "step": running_steps[0],
-                },
+        return 3, {
+            "ok": False,
+            "error": {
+                "code": "STEP_FAILED",
+                "message": f"another step is running: {running_steps[0]}",
+                "step": running_steps[0],
             },
-            3,
-        )
+        }
 
     step_index = STEP_ORDER.index(step)
     for prev in STEP_ORDER[:step_index]:
         if task["steps"][prev] != "done":
-            return out(
-                {
-                    "ok": False,
-                    "error": {
-                        "code": "STEP_FAILED",
-                        "message": f"step '{step}' requires '{prev}' done first",
-                        "step": step,
-                    },
+            return 3, {
+                "ok": False,
+                "error": {
+                    "code": "STEP_FAILED",
+                    "message": f"step '{step}' requires '{prev}' done first",
+                    "step": step,
                 },
-                3,
-            )
+            }
 
     task["status"] = "processing"
     task["current_step"] = step
     task["steps"][step] = "running"
     save_task(runtime_dir, task)
-    append_event(runtime_dir, args.task_id, "task.run_step.start", {"step": step, "hitl": step in HITL_STEPS})
+    append_event(runtime_dir, task_id, "task.run_step.start", {"step": step, "hitl": step in HITL_STEPS})
 
-    out_dir = runtime_dir / args.task_id
+    out_dir = runtime_dir / task_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         step_payload = execute_step(step, task, runtime_dir)
         output = {
-            "task_id": args.task_id,
+            "task_id": task_id,
             "step": step,
             "hitl": step in HITL_STEPS,
             "generated_at": now_iso(),
@@ -773,14 +1146,10 @@ def cmd_task_run_step(args: argparse.Namespace) -> int:
         task["status"] = "failed"
         task["error"] = {"code": "STEP_FAILED", "message": str(exc), "step": step}
         save_task(runtime_dir, task)
-        append_event(runtime_dir, args.task_id, "task.run_step.failed", {"step": step, "error": task["error"]})
-        return out({"ok": False, "task": task, "error": task["error"]}, 3)
+        append_event(runtime_dir, task_id, "task.run_step.failed", {"step": step, "error": task["error"]})
+        return 3, {"ok": False, "task": task, "error": task["error"]}
 
-    next_step = None
-    for s in STEP_ORDER:
-        if task["steps"][s] != "done":
-            next_step = s
-            break
+    next_step = _next_incomplete_step(task)
     if next_step:
         task["current_step"] = next_step
     else:
@@ -788,8 +1157,81 @@ def cmd_task_run_step(args: argparse.Namespace) -> int:
         task["status"] = "ready"
 
     save_task(runtime_dir, task)
-    append_event(runtime_dir, args.task_id, "task.run_step.done", {"step": step, "output_file": str(out_file)})
-    return out({"ok": True, "task": task, "output_file": str(out_file)})
+    append_event(runtime_dir, task_id, "task.run_step.done", {"step": step, "output_file": str(out_file)})
+    return 0, {"ok": True, "task": task, "output_file": str(out_file)}
+
+
+def _run_auto_until_hitl_or_terminal(runtime_dir: Path, task_id: str) -> tuple[int, dict]:
+    try:
+        task = load_task(runtime_dir, task_id)
+    except FileNotFoundError:
+        return 2, {"ok": False, "error": {"code": "TASK_NOT_FOUND", "message": task_id}}
+
+    executed: list[str] = []
+    while True:
+        if task.get("status") in TERMINAL_STATUSES:
+            break
+        step = _next_incomplete_step(task)
+        if step is None or step in HITL_STEPS:
+            break
+
+        code, payload = _run_single_step(runtime_dir, task_id, step)
+        if code != 0:
+            return code, {
+                "ok": False,
+                "executed_steps": executed,
+                "error": payload.get("error"),
+                "task": payload.get("task"),
+            }
+        executed.append(step)
+        task = payload.get("task", task)
+
+    return 0, {"ok": True, "executed_steps": executed, "task": task}
+
+
+def cmd_task_run_step(args: argparse.Namespace) -> int:
+    runtime_dir = project_runtime_dir(Path(args.project_root).expanduser().resolve())
+    code, payload = _run_single_step(runtime_dir, args.task_id, args.step)
+    if code != 0:
+        return out(payload, code)
+
+    executed = [args.step]
+    last_payload = payload
+
+    if getattr(args, "auto_chain", True):
+        while True:
+            task = last_payload.get("task", {})
+            if task.get("status") in TERMINAL_STATUSES:
+                break
+            next_step = _next_incomplete_step(task)
+            if not next_step or next_step in HITL_STEPS:
+                break
+            code, last_payload = _run_single_step(runtime_dir, args.task_id, next_step)
+            if code != 0:
+                return out(
+                    {
+                        "ok": False,
+                        "executed_steps": executed,
+                        "error": last_payload.get("error", {"code": "STEP_FAILED", "message": "auto-chain failed"}),
+                        "task": last_payload.get("task"),
+                    },
+                    code,
+                )
+            executed.append(next_step)
+
+    result = {
+        "ok": True,
+        "executed_steps": executed,
+        "task": last_payload.get("task"),
+        "output_file": last_payload.get("output_file"),
+    }
+    return out(result)
+
+
+def cmd_task_run_auto(args: argparse.Namespace) -> int:
+    runtime_dir = project_runtime_dir(Path(args.project_root).expanduser().resolve())
+    code, payload = _run_auto_until_hitl_or_terminal(runtime_dir, args.task_id)
+    return out(payload, code)
 
 
 def notify(title: str, message: str) -> None:
@@ -839,6 +1281,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     course_add = course_actions.add_parser("add")
     course_add.add_argument("folder_path")
+    course_add.add_argument(
+        "--no-auto-start",
+        action="store_false",
+        dest="auto_start",
+        help="Create task only; do not auto-run non-HITL steps.",
+    )
+    course_add.set_defaults(auto_start=True)
     course_add.set_defaults(func=cmd_course_add)
 
     course_delete = course_actions.add_parser("delete")
@@ -874,7 +1323,18 @@ def build_parser() -> argparse.ArgumentParser:
     task_run_step = task_actions.add_parser("run-step")
     task_run_step.add_argument("task_id")
     task_run_step.add_argument("step", choices=STEP_ORDER)
+    task_run_step.add_argument(
+        "--no-auto-chain",
+        action="store_false",
+        dest="auto_chain",
+        help="Run only the specified step; do not auto-run following non-HITL steps.",
+    )
+    task_run_step.set_defaults(auto_chain=True)
     task_run_step.set_defaults(func=cmd_task_run_step)
+
+    task_run_auto = task_actions.add_parser("run-auto")
+    task_run_auto.add_argument("task_id")
+    task_run_auto.set_defaults(func=cmd_task_run_auto)
 
     task_watch = task_actions.add_parser("watch")
     task_watch.add_argument("task_id")

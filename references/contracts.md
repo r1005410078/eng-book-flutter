@@ -1,11 +1,12 @@
 # Contracts
 
-## Project Ownership
-- Product requirements and OpenSpec live in: `/Users/rongts/.codex/skills/course-pipeline-ops/project/openspec`
-- Skill orchestration lives in: `~/.codex/skills/course-pipeline-ops`
-- Runtime state lives in project: `/Users/rongts/.codex/skills/course-pipeline-ops/project/runtime/tasks`
+## Ownership
+- Project requirements (OpenSpec): `/Users/rongts/eng-book-flutter/openspec`
+- Skill orchestration: `~/.codex/skills/course-pipeline-ops`
+- Runtime tasks: `/Users/rongts/eng-book-flutter/runtime/tasks`
+- Single script source: `/Users/rongts/eng-book-flutter/tools/course_pipeline/course_pipeline_ops.py`
 
-## Task Status
+## Status Enum
 - `uploaded`
 - `processing`
 - `paused`
@@ -13,7 +14,7 @@
 - `failed`
 - `stopped`
 
-## Step Names
+## Step Enum
 - `ffmpeg`
 - `asr`
 - `align`
@@ -22,17 +23,16 @@
 - `summary`
 - `package`
 
-## Human-in-the-loop Steps
-These steps should be triggered manually by user command:
+## HITL Steps
 - `translate`
 - `grammar`
 - `summary`
 
-## Task JSON Shape (minimum)
+## Task Shape (minimum)
 ```json
 {
-  "task_id": "task_abc123",
-  "course_id": "course_xyz",
+  "task_id": "task_abc12345",
+  "course_id": "course_daily_english",
   "course_path": "/path/to/raw",
   "status": "processing",
   "current_step": "translate",

@@ -7,7 +7,7 @@
 
 ## 2. 任务控制命令（先搭控制面）
 - [x] 2.1 为命令输出定义稳定 JSON 响应格式。
-- [x] 2.2 落盘任务状态文件 `runtime/tasks/<task_id>.json` 与事件日志 `runtime/tasks/events.log`。
+- [x] 2.2 落盘任务状态文件 `.runtime/tasks/<task_id>.json` 与事件日志 `.runtime/tasks/events.log`。
 - [x] 2.3 提供 `course add <folder_path>` 与 `course delete <course_id>`。
 - [x] 2.4 提供 `task pause/resume/stop/retry/delete <task_id>`。
 - [x] 2.5 提供 `task get <task_id>` 与 `task list [--status ...]`。

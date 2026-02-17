@@ -32,9 +32,15 @@ GoRouter router(Ref ref) {
         name: 'sentencePractice',
         pageBuilder: (context, state) {
           final id = state.pathParameters['id'] ?? '1';
+          final packageRoot = state.uri.queryParameters['package'];
+          final courseTitle = state.uri.queryParameters['course'];
           return MaterialPage(
             key: state.pageKey,
-            child: SentencePracticeScreen(sentenceId: id),
+            child: SentencePracticeScreen(
+              sentenceId: id,
+              packageRoot: packageRoot,
+              courseTitle: courseTitle,
+            ),
           );
         },
       ),
@@ -51,9 +57,15 @@ GoRouter router(Ref ref) {
         name: 'readingPractice',
         pageBuilder: (context, state) {
           final id = state.pathParameters['id'] ?? '1';
+          final packageRoot = state.uri.queryParameters['package'];
+          final courseTitle = state.uri.queryParameters['course'];
           return MaterialPage(
             key: state.pageKey,
-            child: ReadingPracticeScreen(sentenceId: id),
+            child: ReadingPracticeScreen(
+              sentenceId: id,
+              packageRoot: packageRoot,
+              courseTitle: courseTitle,
+            ),
           );
         },
       ),

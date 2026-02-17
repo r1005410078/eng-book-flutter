@@ -71,7 +71,7 @@ The system MUST separate skill orchestration from executable pipeline scripts an
 #### Scenario: 任务完成通知
 - **WHEN** 用户执行 `task watch <task_id>` 并且任务进入 `ready` 或 `failed`
 - **THEN** 系统必须输出最终任务摘要并触发一次本地系统通知
-- **AND** 必须将最终状态写入 `runtime/tasks/<task_id>.json` 且追加事件到 `runtime/tasks/events.log`
+- **AND** 必须将最终状态写入 `.runtime/tasks/<task_id>.json` 且追加事件到 `.runtime/tasks/events.log`
 
 ### Requirement: Flutter 消费约束 (Flutter Consumption Contract)
 The system MUST ensure the client consumes only published course packages and never depends on intermediate artifacts.

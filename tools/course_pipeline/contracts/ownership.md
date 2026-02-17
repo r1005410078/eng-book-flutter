@@ -7,6 +7,6 @@
 - Skill orchestration location (if enabled):
   - `~/.codex/skills/course-pipeline-ops`
 - Task runtime state location:
-  - `/Users/rongts/eng-book-flutter/runtime/tasks`
+  - `/Users/rongts/eng-book-flutter/.runtime/tasks`
 
 Skill layer MUST call global command or project script directly and MUST NOT duplicate business script implementation.

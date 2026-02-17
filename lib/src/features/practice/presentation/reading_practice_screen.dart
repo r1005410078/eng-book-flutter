@@ -1,20 +1,30 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../routing/routes.dart';
+import '../application/local_course_provider.dart';
 import '../data/local_course_package_loader.dart';
 import '../data/mock_data.dart';
 import '../domain/sentence_detail.dart';
 
-class ReadingPracticeScreen extends StatefulWidget {
+class ReadingPracticeScreen extends ConsumerStatefulWidget {
   final String sentenceId;
+  final String? packageRoot;
+  final String? courseTitle;
 
-  const ReadingPracticeScreen({super.key, required this.sentenceId});
+  const ReadingPracticeScreen({
+    super.key,
+    required this.sentenceId,
+    this.packageRoot,
+    this.courseTitle,
+  });
 
   @override
-  State<ReadingPracticeScreen> createState() => _ReadingPracticeScreenState();
+  ConsumerState<ReadingPracticeScreen> createState() =>
+      _ReadingPracticeScreenState();
 }
 
-class _ReadingPracticeScreenState extends State<ReadingPracticeScreen> {
+class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
   // Theme constants
   static const Color bgColor = Color(0xFF1a120b); // Dark brown/black
   static const Color accentColor = Color(0xFFFF9F29); // Orange
@@ -34,13 +44,26 @@ class _ReadingPracticeScreenState extends State<ReadingPracticeScreen> {
   }
 
   Future<void> _initializeSentences() async {
-    const packageRoot = String.fromEnvironment(
+    const definedRoot = String.fromEnvironment(
       'COURSE_PACKAGE_DIR',
-      defaultValue: 'runtime/latest/package',
+      defaultValue: '',
     );
+    final discoveredRoot = await discoverLatestReadyPackageRoot();
+    final providerRoot = ref.read(localCourseContextProvider)?.packageRoot;
+    final packageRoot = widget.packageRoot ??
+        providerRoot ??
+        (definedRoot.isNotEmpty ? definedRoot : discoveredRoot ?? '');
+    final courseTitle =
+        widget.courseTitle ?? ref.read(localCourseContextProvider)?.courseTitle;
 
-    final loaded =
-        await loadSentencesFromLocalPackage(packageRoot: packageRoot);
+    if (packageRoot.isNotEmpty) {
+      ref.read(localCourseContextProvider.notifier).state = LocalCourseContext(
+        packageRoot: packageRoot,
+        courseTitle: courseTitle,
+      );
+    }
+
+    final loaded = await ref.read(localCourseSentencesProvider.future);
     var list = loaded.sentences;
     var warning = loaded.warning;
 

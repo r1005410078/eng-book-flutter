@@ -6,5 +6,6 @@
   "INVALID_STATUS": "Status is not in allowed state set",
   "INVALID_STEP": "Step is not in allowed pipeline steps",
   "WATCH_TIMEOUT": "Task watch timeout reached",
-  "STEP_FAILED": "Pipeline step execution failed"
+  "STEP_FAILED": "Pipeline step execution failed",
+  "ASR_NOT_READY": "ASR output is placeholder; provide real transcript before translation"
 }

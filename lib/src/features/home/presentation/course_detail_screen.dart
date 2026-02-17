@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import '../../../routing/routes.dart';
 import '../domain/course.dart';
 
 class CourseDetailScreen extends StatefulWidget {
@@ -190,7 +190,15 @@ class _CourseDetailScreenState extends State<CourseDetailScreen> {
                 height: 56,
                 child: ElevatedButton(
                   onPressed: () {
-                    // TODO: Navigate to learning screen
+                    final sentenceId = course.firstSentenceId ?? '01-0001';
+                    final basePath =
+                        Routes.sentencePractice.replaceFirst(':id', sentenceId);
+                    final packageRoot = course.packageRoot;
+                    final targetPath = packageRoot == null ||
+                            packageRoot.isEmpty
+                        ? basePath
+                        : '$basePath?package=${Uri.encodeComponent(packageRoot)}&course=${Uri.encodeComponent(course.title)}';
+                    context.push(targetPath);
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: kAccentColor,

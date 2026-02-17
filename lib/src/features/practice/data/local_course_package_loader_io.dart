@@ -3,6 +3,24 @@ import 'dart:io';
 
 import '../domain/sentence_detail.dart';
 
+class LocalCourseSummary {
+  final String courseId;
+  final String title;
+  final int lessonCount;
+  final String packageRoot;
+  final String firstSentenceId;
+  final String mediaType;
+
+  const LocalCourseSummary({
+    required this.courseId,
+    required this.title,
+    required this.lessonCount,
+    required this.packageRoot,
+    required this.firstSentenceId,
+    required this.mediaType,
+  });
+}
+
 class LocalSentenceLoadResult {
   final List<SentenceDetail> sentences;
   final String? warning;
@@ -10,22 +28,143 @@ class LocalSentenceLoadResult {
   const LocalSentenceLoadResult({required this.sentences, this.warning});
 }
 
+Future<String?> discoverLatestReadyPackageRoot() async {
+  final runtimeTasks = Directory('${Directory.current.path}/.runtime/tasks');
+  if (!runtimeTasks.existsSync()) return null;
+
+  final taskFiles = runtimeTasks
+      .listSync()
+      .whereType<File>()
+      .where((f) => f.path.endsWith('.json'))
+      .where((f) => f.uri.pathSegments.last.startsWith('task_'))
+      .toList();
+
+  DateTime? latestTime;
+  String? latestPackage;
+
+  for (final file in taskFiles) {
+    dynamic task;
+    try {
+      task = jsonDecode(await file.readAsString());
+    } catch (_) {
+      continue;
+    }
+    if (task is! Map) continue;
+    if ((task['status'] ?? '').toString() != 'ready') continue;
+
+    final taskId = (task['task_id'] ?? '').toString();
+    if (taskId.isEmpty) continue;
+    final packageDir = Directory('${runtimeTasks.path}/$taskId/package');
+    if (!packageDir.existsSync()) continue;
+
+    final updatedAt = DateTime.tryParse((task['updated_at'] ?? '').toString());
+    final ts = updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+    if (latestTime == null || ts.isAfter(latestTime)) {
+      latestTime = ts;
+      latestPackage = packageDir.path;
+    }
+  }
+
+  return latestPackage;
+}
+
+Future<List<LocalCourseSummary>> listLocalCoursePackages() async {
+  final runtimeTasks = Directory('${Directory.current.path}/.runtime/tasks');
+  if (!runtimeTasks.existsSync()) return const [];
+
+  final summaries = <LocalCourseSummary>[];
+  final taskFiles = runtimeTasks
+      .listSync()
+      .whereType<File>()
+      .where((f) => f.path.endsWith('.json'))
+      .where((f) => f.uri.pathSegments.last.startsWith('task_'))
+      .toList();
+
+  for (final file in taskFiles) {
+    dynamic task;
+    try {
+      task = jsonDecode(await file.readAsString());
+    } catch (_) {
+      continue;
+    }
+    if (task is! Map) continue;
+    if ((task['status'] ?? '').toString() != 'ready') continue;
+    final taskId = (task['task_id'] ?? '').toString();
+    if (taskId.isEmpty) continue;
+
+    final packageDir = Directory('${runtimeTasks.path}/$taskId/package');
+    final manifestFile = File('${packageDir.path}/course_manifest.json');
+    if (!manifestFile.existsSync()) continue;
+
+    dynamic manifest;
+    try {
+      manifest = jsonDecode(await manifestFile.readAsString());
+    } catch (_) {
+      continue;
+    }
+    if (manifest is! Map) continue;
+
+    final lessons = manifest['lessons'];
+    if (lessons is! List || lessons.isEmpty) continue;
+    final firstLessonPath = (lessons.first is Map)
+        ? ((lessons.first as Map)['path'] ?? '').toString()
+        : '';
+    if (firstLessonPath.isEmpty) continue;
+
+    final firstLessonFile = File('${packageDir.path}/$firstLessonPath');
+    if (!firstLessonFile.existsSync()) continue;
+
+    dynamic firstLesson;
+    try {
+      firstLesson = jsonDecode(await firstLessonFile.readAsString());
+    } catch (_) {
+      continue;
+    }
+    if (firstLesson is! Map) continue;
+
+    final media =
+        firstLesson['media'] is Map ? firstLesson['media'] as Map : {};
+    final mediaType = (media['type'] ?? 'video').toString();
+    final firstSentences = firstLesson['sentences'];
+    if (firstSentences is! List || firstSentences.isEmpty) continue;
+    final firstSentence =
+        firstSentences.first is Map ? firstSentences.first as Map : const {};
+    final firstSentenceId = (firstSentence['sentence_id'] ?? '').toString();
+    if (firstSentenceId.isEmpty) continue;
+
+    summaries.add(
+      LocalCourseSummary(
+        courseId: (manifest['course_id'] ?? 'local_course').toString(),
+        title:
+            (manifest['title'] ?? manifest['course_id'] ?? '本地课程').toString(),
+        lessonCount: _toInt(manifest['lesson_count']),
+        packageRoot: packageDir.path,
+        firstSentenceId: firstSentenceId,
+        mediaType: mediaType,
+      ),
+    );
+  }
+
+  summaries.sort((a, b) => b.packageRoot.compareTo(a.packageRoot));
+  return summaries;
+}
+
 Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({
   required String packageRoot,
 }) async {
   final packageDir = Directory(packageRoot);
   if (!packageDir.existsSync()) {
-    return const LocalSentenceLoadResult(
+    return LocalSentenceLoadResult(
       sentences: [],
-      warning: '本地课程包不存在，已使用默认内容。',
+      warning: '本地课程包不存在($packageRoot)，已使用默认内容。',
     );
   }
 
   final manifestFile = File('${packageDir.path}/course_manifest.json');
   if (!manifestFile.existsSync()) {
-    return const LocalSentenceLoadResult(
+    return LocalSentenceLoadResult(
       sentences: [],
-      warning: '缺少 course_manifest.json，已使用默认内容。',
+      warning: '缺少 course_manifest.json($packageRoot)，已使用默认内容。',
     );
   }
 
@@ -39,6 +178,8 @@ Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({
     );
   }
 
+  final courseTitle =
+      (manifest['title'] ?? manifest['course_id'] ?? '本地课程').toString();
   final lessons = manifest['lessons'];
   if (lessons is! List || lessons.isEmpty) {
     return const LocalSentenceLoadResult(
@@ -66,6 +207,15 @@ Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({
 
     final sentences = lessonJson['sentences'];
     if (sentences is! List) continue;
+    final lessonId = (lessonJson['lesson_id'] ?? '').toString();
+    final lessonTitle = (lessonJson['title'] ?? '').toString();
+    final media =
+        lessonJson['media'] is Map ? lessonJson['media'] as Map : const {};
+    final mediaType = (media['type'] ?? 'video').toString();
+    final mediaRelativePath = (media['path'] ?? '').toString();
+    final mediaPath = mediaRelativePath.isEmpty
+        ? null
+        : '${lessonFile.parent.path}/$mediaRelativePath';
 
     for (final row in sentences) {
       if (row is! Map) continue;
@@ -84,14 +234,14 @@ Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({
 
       final notes = <String, String>{
         if ((grammar['pattern'] ?? '').toString().isNotEmpty)
-          'Grammar': (grammar['pattern'] ?? '').toString(),
+          '语法结构': (grammar['pattern'] ?? '').toString(),
         if (grammar['points'] is List && (grammar['points'] as List).isNotEmpty)
-          'Grammar Points':
+          '语法要点':
               (grammar['points'] as List).map((e) => e.toString()).join('; '),
         if ((usage['scene'] ?? '').toString().isNotEmpty)
-          'Usage Scene': (usage['scene'] ?? '').toString(),
+          '使用场景': (usage['scene'] ?? '').toString(),
         if ((usage['tone'] ?? '').toString().isNotEmpty)
-          'Tone': (usage['tone'] ?? '').toString(),
+          '语气': (usage['tone'] ?? '').toString(),
       };
 
       result.add(
@@ -105,6 +255,12 @@ Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({
           endTime: Duration(
             milliseconds: endMs > startMs ? endMs : startMs + 1000,
           ),
+          lessonId: lessonId.isEmpty ? null : lessonId,
+          lessonTitle: lessonTitle.isEmpty ? null : lessonTitle,
+          mediaType: mediaType,
+          mediaPath: mediaPath,
+          courseTitle: courseTitle,
+          packageRoot: packageDir.path,
         ),
       );
     }

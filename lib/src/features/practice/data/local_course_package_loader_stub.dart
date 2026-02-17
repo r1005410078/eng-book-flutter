@@ -1,10 +1,36 @@
 import '../domain/sentence_detail.dart';
 
+class LocalCourseSummary {
+  final String courseId;
+  final String title;
+  final int lessonCount;
+  final String packageRoot;
+  final String firstSentenceId;
+  final String mediaType;
+
+  const LocalCourseSummary({
+    required this.courseId,
+    required this.title,
+    required this.lessonCount,
+    required this.packageRoot,
+    required this.firstSentenceId,
+    required this.mediaType,
+  });
+}
+
 class LocalSentenceLoadResult {
   final List<SentenceDetail> sentences;
   final String? warning;
 
   const LocalSentenceLoadResult({required this.sentences, this.warning});
+}
+
+Future<String?> discoverLatestReadyPackageRoot() async {
+  return null;
+}
+
+Future<List<LocalCourseSummary>> listLocalCoursePackages() async {
+  return const [];
 }
 
 Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({

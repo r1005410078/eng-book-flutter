@@ -28,7 +28,7 @@ if [[ "$STATUS" != "ready" ]]; then
   exit 1
 fi
 
-PKG="$ROOT/runtime/tasks/$TASK_ID/package"
+PKG="$ROOT/.runtime/tasks/$TASK_ID/package"
 [[ -f "$PKG/course_manifest.json" ]]
 [[ -f "$PKG/lessons/01/lesson.json" ]]
 [[ -f "$PKG/lessons/01/sub_en.srt" ]]
