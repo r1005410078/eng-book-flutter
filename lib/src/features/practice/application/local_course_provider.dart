@@ -30,16 +30,14 @@ final localCourseSentencesProvider = FutureProvider<LocalSentenceLoadResult>((
     'COURSE_PACKAGE_DIR',
     defaultValue: '',
   );
-  final discovered = await discoverLatestReadyPackageRoot();
   final packageRoot = context?.packageRoot.isNotEmpty == true
       ? context!.packageRoot
-      : (fromDefine.isNotEmpty ? fromDefine : discovered ?? '');
+      : fromDefine;
 
   if (packageRoot.isEmpty) {
     return const LocalSentenceLoadResult(
       sentences: [],
-      warning:
-          '本地课程包未设置，已使用默认内容。请设置 COURSE_PACKAGE_DIR 或确保 .runtime/tasks 下有 ready 任务。',
+      warning: '本地课程包未设置。请设置 COURSE_PACKAGE_DIR 或先在下载中心安装课程。',
     );
   }
   return loadSentencesFromLocalPackage(packageRoot: packageRoot);

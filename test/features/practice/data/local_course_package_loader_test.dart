@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:engbooks/src/common/io/runtime_paths.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:engbooks/src/features/practice/data/local_course_package_loader.dart';
 
@@ -12,9 +13,11 @@ void main() {
     originalCurrent = Directory.current;
     tempDir = await Directory.systemTemp.createTemp('course_loader_test_');
     Directory.current = tempDir;
+    debugSetRuntimeRootOverridePath('${tempDir.path}/.runtime');
   });
 
   tearDown(() async {
+    debugSetRuntimeRootOverridePath(null);
     Directory.current = originalCurrent;
     if (tempDir.existsSync()) {
       await tempDir.delete(recursive: true);

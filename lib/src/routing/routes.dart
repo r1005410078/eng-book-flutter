@@ -7,6 +7,9 @@ class Routes {
   // 主页
   static const String home = '/';
 
+  // 下载中心
+  static const String downloadCenter = '/download-center';
+
   // 句子练习
   static const String sentencePractice = '/practice/sentence/:id';
 

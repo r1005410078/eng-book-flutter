@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../../../common/io/runtime_paths.dart';
 import '../domain/sentence_detail.dart';
 
 class LocalCourseSummary {
@@ -29,7 +30,7 @@ class LocalSentenceLoadResult {
 }
 
 Future<String?> discoverLatestReadyPackageRoot() async {
-  final runtimeTasks = Directory('${Directory.current.path}/.runtime/tasks');
+  final runtimeTasks = await resolveRuntimeTasksDir();
   if (!runtimeTasks.existsSync()) return null;
 
   final taskFiles = runtimeTasks
@@ -69,7 +70,7 @@ Future<String?> discoverLatestReadyPackageRoot() async {
 }
 
 Future<List<LocalCourseSummary>> listLocalCoursePackages() async {
-  final runtimeTasks = Directory('${Directory.current.path}/.runtime/tasks');
+  final runtimeTasks = await resolveRuntimeTasksDir();
   if (!runtimeTasks.existsSync()) return const [];
 
   final summaries = <LocalCourseSummary>[];
@@ -106,31 +107,41 @@ Future<List<LocalCourseSummary>> listLocalCoursePackages() async {
 
     final lessons = manifest['lessons'];
     if (lessons is! List || lessons.isEmpty) continue;
-    final firstLessonPath = (lessons.first is Map)
-        ? ((lessons.first as Map)['path'] ?? '').toString()
-        : '';
-    if (firstLessonPath.isEmpty) continue;
+    String? firstSentenceId;
+    String mediaType = 'video';
 
-    final firstLessonFile = File('${packageDir.path}/$firstLessonPath');
-    if (!firstLessonFile.existsSync()) continue;
+    for (final lesson in lessons) {
+      if (lesson is! Map) continue;
+      final lessonPath = (lesson['path'] ?? '').toString();
+      if (lessonPath.isEmpty) continue;
+      final lessonFile = File('${packageDir.path}/$lessonPath');
+      if (!lessonFile.existsSync()) continue;
 
-    dynamic firstLesson;
-    try {
-      firstLesson = jsonDecode(await firstLessonFile.readAsString());
-    } catch (_) {
-      continue;
+      dynamic lessonJson;
+      try {
+        lessonJson = jsonDecode(await lessonFile.readAsString());
+      } catch (_) {
+        continue;
+      }
+      if (lessonJson is! Map) continue;
+
+      final media =
+          lessonJson['media'] is Map ? lessonJson['media'] as Map : {};
+      mediaType = (media['type'] ?? 'video').toString();
+
+      final sentences = lessonJson['sentences'];
+      if (sentences is! List || sentences.isEmpty) continue;
+      for (final sentence in sentences) {
+        if (sentence is! Map) continue;
+        final id = (sentence['sentence_id'] ?? '').toString();
+        if (id.isEmpty) continue;
+        firstSentenceId = id;
+        break;
+      }
+      if (firstSentenceId != null) break;
     }
-    if (firstLesson is! Map) continue;
 
-    final media =
-        firstLesson['media'] is Map ? firstLesson['media'] as Map : {};
-    final mediaType = (media['type'] ?? 'video').toString();
-    final firstSentences = firstLesson['sentences'];
-    if (firstSentences is! List || firstSentences.isEmpty) continue;
-    final firstSentence =
-        firstSentences.first is Map ? firstSentences.first as Map : const {};
-    final firstSentenceId = (firstSentence['sentence_id'] ?? '').toString();
-    if (firstSentenceId.isEmpty) continue;
+    if (firstSentenceId == null) continue;
 
     summaries.add(
       LocalCourseSummary(
@@ -156,7 +167,7 @@ Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({
   if (!packageDir.existsSync()) {
     return LocalSentenceLoadResult(
       sentences: [],
-      warning: '本地课程包不存在($packageRoot)，已使用默认内容。',
+      warning: '本地课程包不存在($packageRoot)。',
     );
   }
 
@@ -164,7 +175,7 @@ Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({
   if (!manifestFile.existsSync()) {
     return LocalSentenceLoadResult(
       sentences: [],
-      warning: '缺少 course_manifest.json($packageRoot)，已使用默认内容。',
+      warning: '缺少 course_manifest.json($packageRoot)。',
     );
   }
 
@@ -174,7 +185,7 @@ Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({
   } catch (_) {
     return const LocalSentenceLoadResult(
       sentences: [],
-      warning: '课程清单格式错误，已使用默认内容。',
+      warning: '课程清单格式错误。',
     );
   }
 
@@ -184,7 +195,7 @@ Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({
   if (lessons is! List || lessons.isEmpty) {
     return const LocalSentenceLoadResult(
       sentences: [],
-      warning: '课程清单为空，已使用默认内容。',
+      warning: '课程清单为空。',
     );
   }
 
@@ -269,7 +280,7 @@ Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({
   if (result.isEmpty) {
     return const LocalSentenceLoadResult(
       sentences: [],
-      warning: '课程包缺少可用句子，已使用默认内容。',
+      warning: '课程包缺少可用句子。',
     );
   }
 

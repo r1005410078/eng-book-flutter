@@ -43,7 +43,6 @@ class LearningResume {
 
 class LearningResumeStore {
   static const _key = 'learning_resume_v1';
-  static const mockPackageRoot = '__mock__';
   static Future<void> _writeQueue = Future<void>.value();
   static int _latestSaveToken = 0;
 
@@ -69,5 +68,10 @@ class LearningResumeStore {
     } catch (_) {
       return null;
     }
+  }
+
+  static Future<void> clear() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key);
   }
 }

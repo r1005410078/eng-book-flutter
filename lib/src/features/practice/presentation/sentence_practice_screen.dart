@@ -12,7 +12,6 @@ import 'package:video_player/video_player.dart';
 import '../application/local_course_provider.dart';
 import '../data/local_course_package_loader.dart';
 import '../data/learning_resume_store.dart';
-import '../data/mock_data.dart';
 import '../domain/sentence_detail.dart';
 import '../../../routing/routes.dart';
 import 'widgets/short_video_bottom_bar.dart';
@@ -134,28 +133,30 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       'COURSE_PACKAGE_DIR',
       defaultValue: '',
     );
-    final discoveredRoot = await discoverLatestReadyPackageRoot();
     final providerRoot = ref.read(localCourseContextProvider)?.packageRoot;
-    final packageRoot = widget.packageRoot ??
-        providerRoot ??
-        (definedRoot.isNotEmpty ? definedRoot : discoveredRoot ?? '');
+    final packageRoot = widget.packageRoot ?? providerRoot ?? definedRoot;
     final courseTitleInput =
         widget.courseTitle ?? ref.read(localCourseContextProvider)?.courseTitle;
 
-    if (packageRoot.isNotEmpty) {
-      ref.read(localCourseContextProvider.notifier).state = LocalCourseContext(
-        packageRoot: packageRoot,
-        courseTitle: courseTitleInput,
-      );
-    }
-
-    final loaded = await ref.read(localCourseSentencesProvider.future);
-    var list = loaded.sentences;
-    var warning = loaded.warning;
-
+    final loaded = packageRoot.isNotEmpty
+        ? await loadSentencesFromLocalPackage(packageRoot: packageRoot)
+        : await ref.read(localCourseSentencesProvider.future);
+    final list = loaded.sentences;
+    final warning = loaded.warning;
     if (list.isEmpty) {
-      list = mockSentences;
-      warning ??= '本地课程包未就绪，已回退到默认内容。';
+      if (!mounted) return;
+      setState(() {
+        _sentences = const [];
+        _currentIndex = 0;
+        _isPlaying = false;
+        _lessonStartIndices = const [];
+        _currentLessonPage = 0;
+        _isLoading = false;
+        _loadWarning = warning;
+        _currentPackageRoot = null;
+        _currentCourseTitle = null;
+      });
+      return;
     }
 
     final index = list.indexWhere((s) => s.id == widget.sentenceId);
@@ -1251,17 +1252,17 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     if (_sentences.isEmpty || _lessonStartIndices.isEmpty) {
       return _lessonProgressForIndex(_currentIndex);
     }
-    final safePage = _currentLessonPage.clamp(0, _lessonStartIndices.length - 1);
+    final safePage =
+        _currentLessonPage.clamp(0, _lessonStartIndices.length - 1);
     final lessonStart = _lessonStartIndices[safePage];
     final lessonKey = _lessonKeyAt(lessonStart);
     final remembered = _lessonLastSentenceIndex[lessonKey];
-    final displayIndex =
-        (remembered != null &&
-                remembered >= 0 &&
-                remembered < _sentences.length &&
-                _lessonKeyAt(remembered) == lessonKey)
-            ? remembered
-            : lessonStart;
+    final displayIndex = (remembered != null &&
+            remembered >= 0 &&
+            remembered < _sentences.length &&
+            _lessonKeyAt(remembered) == lessonKey)
+        ? remembered
+        : lessonStart;
     return _lessonProgressForIndex(displayIndex);
   }
 
@@ -1400,13 +1401,11 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     }
     final sentence = _sentences[_currentIndex];
     final packageRoot = (_currentPackageRoot ?? sentence.packageRoot)?.trim();
-    final effectivePackageRoot = (packageRoot == null || packageRoot.isEmpty)
-        ? LearningResumeStore.mockPackageRoot
-        : packageRoot;
+    if (packageRoot == null || packageRoot.isEmpty) return;
     final title = _currentCourseTitle ?? sentence.courseTitle ?? '本地课程';
     await LearningResumeStore.save(
       LearningResume(
-        packageRoot: effectivePackageRoot,
+        packageRoot: packageRoot,
         courseTitle: title,
         sentenceId: sentence.id,
         lessonId: sentence.lessonId,
@@ -1478,10 +1477,12 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
               _currentLessonPage.clamp(0, _lessonStartIndices.length - 1),
             ),
           );
-    final cachedCurrent =
-        currentLessonKey == null ? null : _lessonLastMediaPosition[currentLessonKey];
-    final cachedTotal =
-        currentLessonKey == null ? null : _lessonLastMediaDuration[currentLessonKey];
+    final cachedCurrent = currentLessonKey == null
+        ? null
+        : _lessonLastMediaPosition[currentLessonKey];
+    final cachedTotal = currentLessonKey == null
+        ? null
+        : _lessonLastMediaDuration[currentLessonKey];
     var mediaCurrent = rawMediaCurrent;
     var mediaTotal = rawMediaTotal;
     if (_isSentenceSwitching || mediaTotal <= Duration.zero) {
@@ -1517,6 +1518,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
                 currentIndex: lessonProgress.indexInLesson - 1,
                 total: lessonProgress.totalInLesson,
                 onOpenGrid: _openReadingMode,
+                onOpenDownloadCenter: _openDownloadCenter,
               ),
             ),
             Expanded(
@@ -1560,7 +1562,8 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
                       final pageIsPlaying = isCurrentPage
                           ? _isPlaying
                           : _playingStateForIndex(sentenceIndex);
-                      final expectedMediaPath = (sentence.mediaPath ?? '').trim();
+                      final expectedMediaPath =
+                          (sentence.mediaPath ?? '').trim();
                       final currentMediaPath = (_currentMediaPath ?? '').trim();
                       final previewController =
                           _previewControllerCache[sentenceIndex];
@@ -1770,13 +1773,14 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
                     duration: const Duration(milliseconds: 180),
                     curve: Curves.easeOut,
                     opacity: _safeOpacity(
-                      (!pageControlsVisible) || (_isShadowingMode && _isShadowingBusy)
+                      (!pageControlsVisible) ||
+                              (_isShadowingMode && _isShadowingBusy)
                           ? 0
                           : 1,
                     ),
                     child: IgnorePointer(
-                      ignoring:
-                          !pageControlsVisible || (_isShadowingMode && _isShadowingBusy),
+                      ignoring: !pageControlsVisible ||
+                          (_isShadowingMode && _isShadowingBusy),
                       child: ShortVideoBottomBar(
                         accentColor: accentColor,
                         progress: _isSeeking ? _seekProgress : mediaProgress,
@@ -1832,6 +1836,10 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         ? basePath
         : '$basePath?package=${Uri.encodeComponent(package)}&course=${Uri.encodeComponent(_currentCourseTitle ?? '')}';
     context.push(route);
+  }
+
+  void _openDownloadCenter() {
+    context.push(Routes.downloadCenter);
   }
 
   String _formatDuration(Duration duration) {

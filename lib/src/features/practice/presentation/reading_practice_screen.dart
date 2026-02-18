@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import '../../../routing/routes.dart';
 import '../application/local_course_provider.dart';
 import '../data/local_course_package_loader.dart';
-import '../data/mock_data.dart';
 import '../domain/sentence_detail.dart';
 
 class ReadingPracticeScreen extends ConsumerStatefulWidget {
@@ -48,29 +47,14 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
       'COURSE_PACKAGE_DIR',
       defaultValue: '',
     );
-    final discoveredRoot = await discoverLatestReadyPackageRoot();
     final providerRoot = ref.read(localCourseContextProvider)?.packageRoot;
-    final packageRoot = widget.packageRoot ??
-        providerRoot ??
-        (definedRoot.isNotEmpty ? definedRoot : discoveredRoot ?? '');
-    final courseTitle =
-        widget.courseTitle ?? ref.read(localCourseContextProvider)?.courseTitle;
+    final packageRoot = widget.packageRoot ?? providerRoot ?? definedRoot;
 
-    if (packageRoot.isNotEmpty) {
-      ref.read(localCourseContextProvider.notifier).state = LocalCourseContext(
-        packageRoot: packageRoot,
-        courseTitle: courseTitle,
-      );
-    }
-
-    final loaded = await ref.read(localCourseSentencesProvider.future);
-    var list = loaded.sentences;
-    var warning = loaded.warning;
-
-    if (list.isEmpty) {
-      list = mockSentences;
-      warning ??= '本地课程包未就绪，已回退到默认内容。';
-    }
+    final loaded = packageRoot.isNotEmpty
+        ? await loadSentencesFromLocalPackage(packageRoot: packageRoot)
+        : await ref.read(localCourseSentencesProvider.future);
+    final list = loaded.sentences;
+    final warning = loaded.warning;
 
     final index = list.indexWhere((s) => s.id == widget.sentenceId);
 
@@ -173,6 +157,41 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
     if (_isLoading) {
       return const Center(
         child: CircularProgressIndicator(color: accentColor),
+      );
+    }
+    if (_sentences.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.menu_book_outlined,
+                  color: Colors.white54, size: 56),
+              const SizedBox(height: 16),
+              const Text(
+                '暂无可阅读课程',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                _loadWarning ?? '请先前往下载中心安装课程。',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, height: 1.45),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: () => context.push(Routes.downloadCenter),
+                icon: const Icon(Icons.download_rounded),
+                label: const Text('前往下载中心'),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
@@ -551,6 +570,9 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
   }
 
   Widget _buildFloatingControls() {
+    if (_sentences.isEmpty) {
+      return const SizedBox.shrink();
+    }
     return Center(
       child: Container(
         height: 64,

@@ -62,10 +62,11 @@ void main() {
     expect(loaded.lessonId, '02');
   });
 
-  test('mock progress can be stored and loaded', () async {
+  test('progress can be stored and loaded with arbitrary package path',
+      () async {
     const resume = LearningResume(
-      packageRoot: LearningResumeStore.mockPackageRoot,
-      courseTitle: 'Mock Course',
+      packageRoot: '/tmp/another-course',
+      courseTitle: 'Any Course',
       sentenceId: '143',
       lessonId: null,
     );
@@ -74,8 +75,8 @@ void main() {
     final loaded = await LearningResumeStore.load();
 
     expect(loaded, isNotNull);
-    expect(loaded!.packageRoot, LearningResumeStore.mockPackageRoot);
-    expect(loaded.courseTitle, 'Mock Course');
+    expect(loaded!.packageRoot, '/tmp/another-course');
+    expect(loaded.courseTitle, 'Any Course');
     expect(loaded.sentenceId, '143');
   });
 }

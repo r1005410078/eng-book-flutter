@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../features/home/presentation/home_screen.dart';
+import '../features/download_center/presentation/download_center_screen.dart';
 import '../features/practice/presentation/playback_settings_screen.dart';
 import '../features/practice/presentation/reading_practice_screen.dart';
 import '../features/practice/presentation/sentence_practice_screen.dart';
@@ -23,6 +24,14 @@ GoRouter router(Ref ref) {
         pageBuilder: (context, state) => MaterialPage(
           key: state.pageKey,
           child: const HomeScreen(),
+        ),
+      ),
+      GoRoute(
+        path: Routes.downloadCenter,
+        name: 'downloadCenter',
+        pageBuilder: (context, state) => MaterialPage(
+          key: state.pageKey,
+          child: const DownloadCenterScreen(),
         ),
       ),
       GoRoute(
