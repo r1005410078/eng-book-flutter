@@ -7,18 +7,6 @@ class Routes {
   // 主页
   static const String home = '/';
 
-  // 音频播放器
-  static const String audioPlayer = '/audio-player';
-
-  // 学习材料
-  static const String materials = '/materials';
-
-  // 练习记录
-  static const String practice = '/practice';
-
-  // 录音
-  static const String recording = '/recording';
-
   // 句子练习
   static const String sentencePractice = '/practice/sentence/:id';
 
@@ -27,7 +15,4 @@ class Routes {
 
   // 阅读练习 (文本模式)
   static const String readingPractice = '/practice/reading/:id';
-
-  // 课程详情
-  static const String courseDetail = '/course/detail';
 }

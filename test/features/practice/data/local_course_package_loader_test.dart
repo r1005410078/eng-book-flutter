@@ -21,7 +21,7 @@ void main() {
     }
   });
 
-  Future<void> _createTaskPackage({
+  Future<void> createTaskPackage({
     required String taskId,
     required String updatedAt,
     required String courseId,
@@ -85,14 +85,14 @@ void main() {
 
   test('discoverLatestReadyPackageRoot returns latest ready task package',
       () async {
-    await _createTaskPackage(
+    await createTaskPackage(
       taskId: 'task_old',
       updatedAt: '2026-02-16T08:00:00Z',
       courseId: 'course_old',
       title: 'Old',
       mediaType: 'video',
     );
-    await _createTaskPackage(
+    await createTaskPackage(
       taskId: 'task_new',
       updatedAt: '2026-02-16T09:00:00Z',
       courseId: 'course_new',
@@ -108,7 +108,7 @@ void main() {
   test(
       'listLocalCoursePackages and loadSentencesFromLocalPackage parse media and timeline',
       () async {
-    await _createTaskPackage(
+    await createTaskPackage(
       taskId: 'task_single',
       updatedAt: '2026-02-16T10:00:00Z',
       courseId: 'course_single',
@@ -134,5 +134,31 @@ void main() {
     expect(sentence.mediaPath, isNotNull);
     expect(sentence.lessonId, '01');
     expect(sentence.courseTitle, 'Single Course');
+  });
+
+  test('sentenceExistsInLocalPackage validates sentence id by package',
+      () async {
+    await createTaskPackage(
+      taskId: 'task_single',
+      updatedAt: '2026-02-16T10:00:00Z',
+      courseId: 'course_single',
+      title: 'Single Course',
+      mediaType: 'audio',
+    );
+
+    final list = await listLocalCoursePackages();
+    expect(list, isNotEmpty);
+    final packageRoot = list.first.packageRoot;
+
+    final exists = await sentenceExistsInLocalPackage(
+      packageRoot: packageRoot,
+      sentenceId: '01-0001',
+    );
+    final missing = await sentenceExistsInLocalPackage(
+      packageRoot: packageRoot,
+      sentenceId: '01-9999',
+    );
+    expect(exists, isTrue);
+    expect(missing, isFalse);
   });
 }

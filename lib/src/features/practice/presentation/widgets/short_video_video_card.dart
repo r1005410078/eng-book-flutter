@@ -4,7 +4,7 @@ import 'package:video_player/video_player.dart';
 class ShortVideoVideoCard extends StatelessWidget {
   final bool isAudioMode;
   final double progress;
-  final VideoPlayerController videoController;
+  final VideoPlayerController? videoController;
   final bool isPlaying;
   final VoidCallback onTogglePlay;
   final double aspectRatio;
@@ -21,9 +21,11 @@ class ShortVideoVideoCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final effectiveAspectRatio = videoController.value.isInitialized &&
-            videoController.value.aspectRatio > 0
-        ? videoController.value.aspectRatio
+    final controller = videoController;
+    final effectiveAspectRatio = controller != null &&
+            controller.value.isInitialized &&
+            controller.value.aspectRatio > 0
+        ? controller.value.aspectRatio
         : aspectRatio;
 
     return SizedBox.expand(
@@ -57,11 +59,11 @@ class ShortVideoVideoCard extends StatelessWidget {
                 ),
               ),
             )
-          else if (videoController.value.isInitialized)
+          else if (controller != null && controller.value.isInitialized)
             Center(
               child: AspectRatio(
                 aspectRatio: effectiveAspectRatio,
-                child: VideoPlayer(videoController),
+                child: VideoPlayer(controller),
               ),
             )
           else

@@ -276,6 +276,16 @@ Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({
   return LocalSentenceLoadResult(sentences: result);
 }
 
+Future<bool> sentenceExistsInLocalPackage({
+  required String packageRoot,
+  required String sentenceId,
+}) async {
+  if (packageRoot.trim().isEmpty || sentenceId.trim().isEmpty) return false;
+  final loaded = await loadSentencesFromLocalPackage(packageRoot: packageRoot);
+  if (loaded.sentences.isEmpty) return false;
+  return loaded.sentences.any((s) => s.id == sentenceId);
+}
+
 int _toInt(dynamic value) {
   if (value is int) return value;
   if (value is double) return value.toInt();

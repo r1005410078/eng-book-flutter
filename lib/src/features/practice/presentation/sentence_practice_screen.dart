@@ -21,6 +21,7 @@ import 'widgets/short_video_header.dart';
 import 'widgets/short_video_video_card.dart';
 
 enum SubtitleMode { bilingual, englishOnly, hidden }
+
 enum ShadowingPhase { idle, listening, recording, advancing }
 
 class SentencePracticeScreen extends ConsumerStatefulWidget {
@@ -40,7 +41,8 @@ class SentencePracticeScreen extends ConsumerStatefulWidget {
       _SentencePracticeScreenState();
 }
 
-class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen> {
+class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
+    with WidgetsBindingObserver {
   // Data
   List<SentenceDetail> _sentences = [];
   int _currentIndex = 0;
@@ -70,6 +72,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   Timer? _shadowingTicker;
   bool _isSeeking = false;
   double _seekProgress = 0;
+  bool _isTogglingPlay = false;
   int _shadowingSessionId = 0;
   final Duration _shadowingExtraDuration = const Duration(milliseconds: 600);
   final AudioRecorder _audioRecorder = AudioRecorder();
@@ -81,32 +84,42 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   late final PageController _lessonPageController;
   bool _isLessonPaging = false;
   bool _isProgrammaticPageJump = false;
+  bool _isSentenceSwitching = false;
+  int _seekRequestToken = 0;
   List<int> _lessonStartIndices = const [];
   int _currentLessonPage = 0;
   double _horizontalDragOffset = 0;
   int? _horizontalPreviewIndex;
   int _lastHorizontalDragUpdateUs = 0;
+  final Map<String, int> _lessonLastSentenceIndex = {};
+  final Map<String, bool> _lessonPlayingState = {};
+  final Map<String, Duration> _lessonLastMediaPosition = {};
+  final Map<String, Duration> _lessonLastMediaDuration = {};
   final Map<int, VideoPlayerController> _previewControllerCache = {};
   final Set<int> _previewControllerLoading = {};
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _lessonPageController = PageController();
     _audioPlayer = AudioPlayer();
     _audioPositionSub = _audioPlayer.positionStream.listen((pos) {
       _audioPosition = pos;
       _syncSentenceWithAudio(pos);
+      _cacheCurrentLessonMediaState();
       if (mounted) setState(() {});
     });
     _audioStateSub = _audioPlayer.playerStateStream.listen((state) {
       if (!mounted || !_isAudioMode) return;
       setState(() {
         _isPlaying = state.playing;
+        _cacheCurrentLessonPlayingState();
       });
     });
     _audioDurationSub = _audioPlayer.durationStream.listen((duration) {
       _audioDuration = duration ?? Duration.zero;
+      _cacheCurrentLessonMediaState();
       if (mounted && _isAudioMode) setState(() {});
     });
     _videoController = VideoPlayerController.networkUrl(
@@ -148,7 +161,8 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     final index = list.indexWhere((s) => s.id == widget.sentenceId);
     final targetIndex = index != -1 ? index : 0;
     final lessonStarts = _computeLessonStartIndices(list);
-    final targetLessonPage = _lessonPageForSentenceIndex(lessonStarts, targetIndex);
+    final targetLessonPage =
+        _lessonPageForSentenceIndex(lessonStarts, targetIndex);
     final mediaPath = list[targetIndex].mediaPath;
     final mediaType = list[targetIndex].mediaType;
     final courseTitle =
@@ -161,9 +175,11 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     );
 
     if (!mounted) return;
+    final initialPlaying = _playingStateForIndex(targetIndex);
     setState(() {
       _sentences = list;
       _currentIndex = targetIndex;
+      _isPlaying = initialPlaying;
       _lessonStartIndices = lessonStarts;
       _currentLessonPage = targetLessonPage;
       _isLoading = false;
@@ -171,6 +187,8 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       _currentPackageRoot = packageRoot.isEmpty ? null : packageRoot;
       _currentCourseTitle = courseTitle;
     });
+    _lessonLastSentenceIndex[_lessonKeyAt(targetIndex)] = targetIndex;
+    _cacheCurrentLessonPlayingState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_lessonPageController.hasClients) return;
       _isProgrammaticPageJump = true;
@@ -185,7 +203,10 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     String? mediaPath, {
     String? mediaType,
     Duration? seekTo,
+    int? requestToken,
   }) async {
+    bool isActiveRequest() =>
+        requestToken == null || requestToken == _seekRequestToken;
     final path = (mediaPath ?? '').trim();
     final lowerPath = path.toLowerCase();
     final useAudio = (mediaType ?? '').toLowerCase() == 'audio' ||
@@ -195,11 +216,13 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         lowerPath.endsWith('.m4a');
 
     if (path.isEmpty) {
+      if (!isActiveRequest()) return;
       await _initFallbackVideo(seekTo: seekTo);
       return;
     }
 
     if (_currentMediaPath == path) {
+      if (!isActiveRequest()) return;
       if (_isAudioMode) {
         if (seekTo != null) {
           await _audioPlayer.seek(seekTo);
@@ -216,6 +239,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
 
     if (useAudio) {
       try {
+        if (!isActiveRequest()) return;
         if (_videoController.value.isInitialized) {
           await _videoController.pause();
         }
@@ -226,9 +250,11 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         if (seekTo != null) {
           await _audioPlayer.seek(seekTo);
         }
+        if (!isActiveRequest()) return;
         if (_isPlaying) {
           await _audioPlayer.play();
         }
+        if (!isActiveRequest()) return;
         if (mounted) {
           setState(() {
             _isAudioMode = true;
@@ -250,9 +276,18 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
 
     final old = _videoController;
     old.removeListener(_syncSentenceWithVideo);
+    void restoreOldListener() {
+      old.addListener(_syncSentenceWithVideo);
+    }
+
     try {
       final next = VideoPlayerController.file(File(path));
       await next.initialize();
+      if (!isActiveRequest()) {
+        restoreOldListener();
+        await next.dispose();
+        return;
+      }
       await next.setLooping(true);
       await next.setVolume(_volume);
       await next.setPlaybackSpeed(_playbackSpeed);
@@ -260,8 +295,20 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       if (seekTo != null) {
         await next.seekTo(seekTo);
       }
+      if (!isActiveRequest()) {
+        restoreOldListener();
+        next.removeListener(_syncSentenceWithVideo);
+        await next.dispose();
+        return;
+      }
       if (_isPlaying) {
         await next.play();
+      }
+      if (!isActiveRequest()) {
+        restoreOldListener();
+        next.removeListener(_syncSentenceWithVideo);
+        await next.dispose();
+        return;
       }
 
       if (mounted) {
@@ -309,10 +356,21 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   // Future<void> _prepareWaveform() async { ... }
 
   void _syncSentenceWithVideo() {
+    if (_isSentenceSwitching) return;
     if (_isAudioMode) return;
     if (!_videoController.value.isInitialized) return;
 
     final currentPos = _videoController.value.position;
+    final currentPlaying = _videoController.value.isPlaying;
+    if (_isPlaying != currentPlaying && mounted) {
+      setState(() {
+        _isPlaying = currentPlaying;
+        _cacheCurrentLessonPlayingState();
+      });
+    } else {
+      _cacheCurrentLessonPlayingState();
+    }
+    _cacheCurrentLessonMediaState();
     // debugPrint("Syncing: $currentPos"); // Uncomment for verbose logs
 
     if (_isShadowingMode &&
@@ -328,8 +386,9 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       return;
     }
 
-    // Simple linear check
-    for (int i = 0; i < _sentences.length; i++) {
+    // Only sync inside current lesson to avoid cross-lesson timestamp collisions.
+    final bounds = _lessonBoundsForIndex(_currentIndex);
+    for (int i = bounds.start; i <= bounds.end; i++) {
       final s = _sentences[i];
       if (currentPos >= s.startTime && currentPos < s.endTime) {
         if (_currentIndex != i) {
@@ -337,6 +396,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
           setState(() {
             _currentIndex = i;
           });
+          _lessonLastSentenceIndex[_lessonKeyAt(i)] = i;
           unawaited(_persistLearningResume());
         }
         break;
@@ -345,6 +405,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   }
 
   void _syncSentenceWithAudio(Duration currentPos) {
+    if (_isSentenceSwitching) return;
     if (!_isAudioMode) return;
     if (_isShadowingMode &&
         _currentIndex >= 0 &&
@@ -358,13 +419,15 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       }
       return;
     }
-    for (int i = 0; i < _sentences.length; i++) {
+    final bounds = _lessonBoundsForIndex(_currentIndex);
+    for (int i = bounds.start; i <= bounds.end; i++) {
       final s = _sentences[i];
       if (currentPos >= s.startTime && currentPos < s.endTime) {
         if (_currentIndex != i && mounted) {
           setState(() {
             _currentIndex = i;
           });
+          _lessonLastSentenceIndex[_lessonKeyAt(i)] = i;
           unawaited(_persistLearningResume());
         }
         break;
@@ -372,8 +435,48 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     }
   }
 
+  void _cacheCurrentLessonMediaState() {
+    if (_isSentenceSwitching) return;
+    if (_sentences.isEmpty) return;
+    final safeIndex = _currentIndex.clamp(0, _sentences.length - 1);
+    final key = _lessonKeyAt(safeIndex);
+    final position = _isAudioMode
+        ? _audioPosition
+        : (_videoController.value.isInitialized
+            ? _videoController.value.position
+            : Duration.zero);
+    final duration = _isAudioMode
+        ? _audioDuration
+        : (_videoController.value.isInitialized
+            ? _videoController.value.duration
+            : Duration.zero);
+    if (position >= Duration.zero) {
+      _lessonLastMediaPosition[key] = position;
+    }
+    if (duration > Duration.zero) {
+      _lessonLastMediaDuration[key] = duration;
+    }
+  }
+
+  void _cacheMediaStateForLessonIndex(
+    int index, {
+    required Duration position,
+    required Duration duration,
+  }) {
+    if (_sentences.isEmpty) return;
+    if (index < 0 || index >= _sentences.length) return;
+    final key = _lessonKeyAt(index);
+    if (position >= Duration.zero) {
+      _lessonLastMediaPosition[key] = position;
+    }
+    if (duration > Duration.zero) {
+      _lessonLastMediaDuration[key] = duration;
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _clearPreviewControllerCache();
     _lessonPageController.dispose();
     _exitFullscreenMode();
@@ -390,6 +493,15 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     _audioRecorder.dispose();
     // _waveformController?.dispose(); // Waveform removed
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      unawaited(_persistLearningResume());
+    }
   }
 
   void _clearPreviewControllerCache() {
@@ -554,10 +666,12 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         if (mounted) {
           setState(() {
             _isPlaying = false;
+            _cacheCurrentLessonPlayingState();
             _shadowingPhase = ShadowingPhase.listening;
           });
         } else {
           _isPlaying = false;
+          _cacheCurrentLessonPlayingState();
           _shadowingPhase = ShadowingPhase.listening;
         }
         return;
@@ -567,9 +681,11 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         if (mounted) {
           setState(() {
             _isPlaying = true;
+            _cacheCurrentLessonPlayingState();
           });
         } else {
           _isPlaying = true;
+          _cacheCurrentLessonPlayingState();
         }
       }
       await _seekToSentence(nextIndex);
@@ -609,9 +725,11 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     if (mounted) {
       setState(() {
         _isPlaying = false;
+        _cacheCurrentLessonPlayingState();
       });
     } else {
       _isPlaying = false;
+      _cacheCurrentLessonPlayingState();
     }
   }
 
@@ -624,9 +742,11 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     if (mounted) {
       setState(() {
         _isPlaying = true;
+        _cacheCurrentLessonPlayingState();
       });
     } else {
       _isPlaying = true;
+      _cacheCurrentLessonPlayingState();
     }
   }
 
@@ -681,36 +801,58 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   }
 
   void _togglePlay() async {
+    if (_isTogglingPlay) return;
     if (_isShadowingMode && _shadowingLocked) {
       return;
     }
     if (_isShadowingMode && _isShadowingBusy) {
       await _cancelShadowingStep(keepMode: true);
     }
-    if (_isAudioMode) {
-      if (_isPlaying) {
-        await _audioPlayer.pause();
-      } else {
-        await _audioPlayer.play();
-      }
-    } else {
-      if (!_videoController.value.isInitialized) return;
-      if (_isPlaying) {
-        await _videoController.pause();
-      } else {
-        await _videoController.play();
-      }
-    }
-    // _isPlaying state is updated by listener, but for immediate UI feedback:
+    final shouldPlay = !_isPlaying;
     setState(() {
-      _isPlaying = !_isPlaying;
+      _isPlaying = shouldPlay;
+      _cacheCurrentLessonPlayingState();
     });
+    _isTogglingPlay = true;
+    try {
+      if (_isAudioMode) {
+        if (shouldPlay) {
+          await _audioPlayer.play();
+        } else {
+          await _audioPlayer.pause();
+        }
+      } else {
+        if (!_videoController.value.isInitialized) return;
+        if (shouldPlay) {
+          await _videoController.play();
+        } else {
+          await _videoController.pause();
+        }
+      }
+      final actualPlaying = _isAudioMode
+          ? _audioPlayer.playing
+          : (_videoController.value.isInitialized
+              ? _videoController.value.isPlaying
+              : false);
+      if (!mounted) {
+        _isPlaying = actualPlaying;
+        _cacheCurrentLessonPlayingState();
+        return;
+      }
+      setState(() {
+        _isPlaying = actualPlaying;
+        _cacheCurrentLessonPlayingState();
+      });
+    } finally {
+      _isTogglingPlay = false;
+    }
   }
 
   String _shadowingStatusText() {
     if (!_isShadowingMode) return '';
     if (_shadowingPhase == ShadowingPhase.recording) {
-      final seconds = (_shadowingRemaining.inMilliseconds / 1000).toStringAsFixed(1);
+      final seconds =
+          (_shadowingRemaining.inMilliseconds / 1000).toStringAsFixed(1);
       return '跟读中 ${seconds}s';
     }
     if (_shadowingPhase == ShadowingPhase.advancing) {
@@ -971,17 +1113,50 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   }
 
   String _lessonKeyFromSentence(SentenceDetail sentence) {
+    final packageRoot = (sentence.packageRoot ?? '').trim();
+    final courseTitle = (sentence.courseTitle ?? '').trim();
+    final scope = packageRoot.isNotEmpty
+        ? 'pkg:$packageRoot'
+        : (courseTitle.isNotEmpty ? 'course:$courseTitle' : 'global');
     final lessonId = (sentence.lessonId ?? '').trim();
-    if (lessonId.isNotEmpty) return 'lesson:$lessonId';
+    if (lessonId.isNotEmpty) return '$scope|lesson:$lessonId';
     final lessonTitle = (sentence.lessonTitle ?? '').trim();
-    if (lessonTitle.isNotEmpty) return 'title:$lessonTitle';
+    if (lessonTitle.isNotEmpty) return '$scope|title:$lessonTitle';
     final mediaPath = (sentence.mediaPath ?? '').trim();
-    if (mediaPath.isNotEmpty) return 'media:$mediaPath';
-    return 'default';
+    if (mediaPath.isNotEmpty) return '$scope|media:$mediaPath';
+    return '$scope|default';
   }
 
   String _lessonKeyAt(int index) {
     return _lessonKeyFromSentence(_sentences[index]);
+  }
+
+  bool _playingStateForIndex(int index) {
+    if (_sentences.isEmpty) return false;
+    if (index < 0 || index >= _sentences.length) return false;
+    return _lessonPlayingState[_lessonKeyAt(index)] ?? false;
+  }
+
+  void _cacheCurrentLessonPlayingState() {
+    if (_sentences.isEmpty) return;
+    if (_currentIndex < 0 || _currentIndex >= _sentences.length) return;
+    final key = _lessonKeyAt(_currentIndex);
+    _lessonPlayingState[key] = _isPlaying;
+  }
+
+  ({int start, int end}) _lessonBoundsForIndex(int index) {
+    if (_sentences.isEmpty) return (start: 0, end: 0);
+    final safeIndex = index.clamp(0, _sentences.length - 1);
+    final key = _lessonKeyAt(safeIndex);
+    var start = safeIndex;
+    while (start - 1 >= 0 && _lessonKeyAt(start - 1) == key) {
+      start--;
+    }
+    var end = safeIndex;
+    while (end + 1 < _sentences.length && _lessonKeyAt(end + 1) == key) {
+      end++;
+    }
+    return (start: start, end: end);
   }
 
   Future<VideoPlayerController?> _ensurePreviewControllerForIndex(
@@ -1030,15 +1205,17 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
 
   Future<void> _warmAdjacentLessonPreviews() async {
     if (_sentences.isEmpty || _lessonStartIndices.isEmpty) return;
-    if (_currentLessonPage < 0 || _currentLessonPage >= _lessonStartIndices.length) {
+    if (_currentLessonPage < 0 ||
+        _currentLessonPage >= _lessonStartIndices.length) {
       return;
     }
     final prevPage = _currentLessonPage - 1;
     final nextPage = _currentLessonPage + 1;
     final keep = <int>{
-      _lessonStartIndices[_currentLessonPage],
-      if (prevPage >= 0) _lessonStartIndices[prevPage],
-      if (nextPage < _lessonStartIndices.length) _lessonStartIndices[nextPage],
+      _targetSentenceIndexForLessonPage(_currentLessonPage),
+      if (prevPage >= 0) _targetSentenceIndexForLessonPage(prevPage),
+      if (nextPage < _lessonStartIndices.length)
+        _targetSentenceIndexForLessonPage(nextPage),
     };
     for (final index in keep) {
       await _ensurePreviewControllerForIndex(index);
@@ -1070,15 +1247,35 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     );
   }
 
+  ({int indexInLesson, int totalInLesson}) _headerProgressForCurrentLesson() {
+    if (_sentences.isEmpty || _lessonStartIndices.isEmpty) {
+      return _lessonProgressForIndex(_currentIndex);
+    }
+    final safePage = _currentLessonPage.clamp(0, _lessonStartIndices.length - 1);
+    final lessonStart = _lessonStartIndices[safePage];
+    final lessonKey = _lessonKeyAt(lessonStart);
+    final remembered = _lessonLastSentenceIndex[lessonKey];
+    final displayIndex =
+        (remembered != null &&
+                remembered >= 0 &&
+                remembered < _sentences.length &&
+                _lessonKeyAt(remembered) == lessonKey)
+            ? remembered
+            : lessonStart;
+    return _lessonProgressForIndex(displayIndex);
+  }
+
   Future<void> _onLessonPageChanged(int page) async {
-    if (_lessonStartIndices.isEmpty || page < 0 || page >= _lessonStartIndices.length) {
+    if (_lessonStartIndices.isEmpty ||
+        page < 0 ||
+        page >= _lessonStartIndices.length) {
       return;
     }
     setState(() {
       _currentLessonPage = page;
     });
     if (_isProgrammaticPageJump) return;
-    final targetSentenceIndex = _lessonStartIndices[page];
+    final targetSentenceIndex = _targetSentenceIndexForLessonPage(page);
     if (targetSentenceIndex == _currentIndex) {
       _clearHorizontalPreview();
       unawaited(_warmAdjacentLessonPreviews());
@@ -1088,9 +1285,19 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     await _seekToSentence(targetSentenceIndex);
   }
 
-  VideoPlayerController _videoControllerForPage(int page, int sentenceIndex) {
+  int _targetSentenceIndexForLessonPage(int page) {
+    final startIndex = _lessonStartIndices[page];
+    final key = _lessonKeyAt(startIndex);
+    final remembered = _lessonLastSentenceIndex[key];
+    if (remembered == null) return startIndex;
+    if (remembered < 0 || remembered >= _sentences.length) return startIndex;
+    if (_lessonKeyAt(remembered) != key) return startIndex;
+    return remembered;
+  }
+
+  VideoPlayerController? _videoControllerForPage(int page, int sentenceIndex) {
     if (page == _currentLessonPage) return _videoController;
-    return _previewControllerCache[sentenceIndex] ?? _videoController;
+    return _previewControllerCache[sentenceIndex];
   }
 
   Widget _buildCaptionContent(
@@ -1122,27 +1329,67 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   }
 
   Future<void> _seekToSentence(int index) async {
+    if (index < 0 || index >= _sentences.length) return;
+    final requestToken = ++_seekRequestToken;
     final s = _sentences[index];
     setState(() {
       _horizontalDragOffset = 0;
       _horizontalPreviewIndex = null;
+      _isSentenceSwitching = true;
       _currentIndex = index;
+      _isPlaying = _playingStateForIndex(index);
     });
-    _syncLessonPageWithCurrentSentence();
-    unawaited(_persistLearningResume());
-    await _switchMedia(
-      s.mediaPath,
-      mediaType: s.mediaType,
-      seekTo: s.startTime,
-    );
-    if (_isAudioMode) {
-      await _audioPlayer.seek(s.startTime);
-    } else if (_videoController.value.isInitialized) {
-      await _videoController.seekTo(s.startTime);
+
+    try {
+      await _switchMedia(
+        s.mediaPath,
+        mediaType: s.mediaType,
+        seekTo: s.startTime,
+        requestToken: requestToken,
+      );
+      if (!mounted || requestToken != _seekRequestToken) return;
+
+      if (_isAudioMode) {
+        await _audioPlayer.seek(s.startTime);
+      } else if (_videoController.value.isInitialized) {
+        await _videoController.seekTo(s.startTime);
+      }
+
+      if (!mounted || requestToken != _seekRequestToken) return;
+      final actualPlaying = _isAudioMode
+          ? _audioPlayer.playing
+          : (_videoController.value.isInitialized
+              ? _videoController.value.isPlaying
+              : false);
+      setState(() {
+        _isPlaying = actualPlaying;
+      });
+      final activeDuration = _isAudioMode
+          ? _audioDuration
+          : (_videoController.value.isInitialized
+              ? _videoController.value.duration
+              : Duration.zero);
+      _cacheMediaStateForLessonIndex(
+        index,
+        position: s.startTime,
+        duration: activeDuration,
+      );
+      _lessonLastSentenceIndex[_lessonKeyAt(index)] = index;
+      _cacheCurrentLessonPlayingState();
+      _syncLessonPageWithCurrentSentence();
+      await _persistLearningResume();
+      unawaited(_warmAdjacentLessonPreviews());
+      // _audioPlayer.seek(s.startTime); // Not using separate audio
+      // Waveform removed
+    } finally {
+      if (mounted &&
+          requestToken == _seekRequestToken &&
+          _isSentenceSwitching) {
+        setState(() {
+          _isSentenceSwitching = false;
+        });
+      }
     }
-    unawaited(_warmAdjacentLessonPreviews());
-    // _audioPlayer.seek(s.startTime); // Not using separate audio
-    // Waveform removed
   }
 
   Future<void> _persistLearningResume() async {
@@ -1152,14 +1399,17 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       return;
     }
     final sentence = _sentences[_currentIndex];
-    final packageRoot = _currentPackageRoot ?? sentence.packageRoot;
-    if (packageRoot == null || packageRoot.isEmpty) return;
+    final packageRoot = (_currentPackageRoot ?? sentence.packageRoot)?.trim();
+    final effectivePackageRoot = (packageRoot == null || packageRoot.isEmpty)
+        ? LearningResumeStore.mockPackageRoot
+        : packageRoot;
     final title = _currentCourseTitle ?? sentence.courseTitle ?? '本地课程';
     await LearningResumeStore.save(
       LearningResume(
-        packageRoot: packageRoot,
+        packageRoot: effectivePackageRoot,
         courseTitle: title,
         sentenceId: sentence.id,
+        lessonId: sentence.lessonId,
       ),
     );
   }
@@ -1211,16 +1461,40 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
 
     const accentColor = Color(0xFFFF9F29);
 
-    final mediaCurrent = _isAudioMode
+    final rawMediaCurrent = _isAudioMode
         ? _audioPosition
         : (_videoController.value.isInitialized
             ? _videoController.value.position
             : Duration.zero);
-    final mediaTotal = _isAudioMode
+    final rawMediaTotal = _isAudioMode
         ? _audioDuration
         : (_videoController.value.isInitialized
             ? _videoController.value.duration
             : Duration.zero);
+    final currentLessonKey = _sentences.isEmpty || _lessonStartIndices.isEmpty
+        ? null
+        : _lessonKeyAt(
+            _targetSentenceIndexForLessonPage(
+              _currentLessonPage.clamp(0, _lessonStartIndices.length - 1),
+            ),
+          );
+    final cachedCurrent =
+        currentLessonKey == null ? null : _lessonLastMediaPosition[currentLessonKey];
+    final cachedTotal =
+        currentLessonKey == null ? null : _lessonLastMediaDuration[currentLessonKey];
+    var mediaCurrent = rawMediaCurrent;
+    var mediaTotal = rawMediaTotal;
+    if (_isSentenceSwitching || mediaTotal <= Duration.zero) {
+      if (cachedTotal != null && cachedTotal > Duration.zero) {
+        mediaTotal = cachedTotal;
+      }
+      if (cachedCurrent != null && cachedCurrent >= Duration.zero) {
+        mediaCurrent = cachedCurrent;
+      }
+    }
+    if (mediaTotal > Duration.zero && mediaCurrent > mediaTotal) {
+      mediaCurrent = mediaTotal;
+    }
     final mediaProgress = mediaTotal.inMilliseconds <= 0
         ? 0.0
         : (mediaCurrent.inMilliseconds / mediaTotal.inMilliseconds)
@@ -1229,7 +1503,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     final compactLayout = height < 780;
     final videoFlex = compactLayout ? 7 : 8;
     final captionTopGap = compactLayout ? 10.0 : 16.0;
-    final lessonProgress = _lessonProgressForIndex(_currentIndex);
+    final lessonProgress = _headerProgressForCurrentLesson();
 
     return Scaffold(
       extendBody: false,
@@ -1249,14 +1523,18 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
               child: ClipRect(
                 child: NotificationListener<ScrollNotification>(
                   onNotification: (notification) {
-                    if (notification.metrics.axis != Axis.vertical) return false;
+                    if (notification.metrics.axis != Axis.vertical) {
+                      return false;
+                    }
                     if (notification is ScrollStartNotification &&
                         !_isLessonPaging) {
                       setState(() {
                         _isLessonPaging = true;
                       });
+                      unawaited(_warmAdjacentLessonPreviews());
                     }
-                    if (notification is ScrollEndNotification && _isLessonPaging) {
+                    if (notification is ScrollEndNotification &&
+                        _isLessonPaging) {
                       setState(() {
                         _isLessonPaging = false;
                       });
@@ -1277,28 +1555,51 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
                       final isCurrentPage = page == _currentLessonPage;
                       final sentenceIndex = isCurrentPage
                           ? _currentIndex
-                          : _lessonStartIndices[page];
+                          : _targetSentenceIndexForLessonPage(page);
                       final sentence = _sentences[sentenceIndex];
-                      final isAudioMode = isCurrentPage
-                          ? _isAudioMode
-                          : ((sentence.mediaType ?? '').toLowerCase() == 'audio');
-                      final videoController =
-                          _videoControllerForPage(page, sentenceIndex);
+                      final pageIsPlaying = isCurrentPage
+                          ? _isPlaying
+                          : _playingStateForIndex(sentenceIndex);
+                      final expectedMediaPath = (sentence.mediaPath ?? '').trim();
+                      final currentMediaPath = (_currentMediaPath ?? '').trim();
+                      final previewController =
+                          _previewControllerCache[sentenceIndex];
+                      final hasReadyPreview = previewController != null &&
+                          previewController.value.isInitialized;
+                      final shouldMaskSwitchingFrame = isCurrentPage &&
+                          _isSentenceSwitching &&
+                          expectedMediaPath.isNotEmpty &&
+                          expectedMediaPath != currentMediaPath &&
+                          !hasReadyPreview;
+                      final isAudioMode = shouldMaskSwitchingFrame
+                          ? false
+                          : (isCurrentPage
+                              ? _isAudioMode
+                              : ((sentence.mediaType ?? '').toLowerCase() ==
+                                  'audio'));
+                      final videoController = shouldMaskSwitchingFrame
+                          ? null
+                          : (isCurrentPage &&
+                                  _isSentenceSwitching &&
+                                  hasReadyPreview
+                              ? previewController
+                              : _videoControllerForPage(page, sentenceIndex));
                       final pageChild = _buildLearningLayer(
-                          sentenceIndex: sentenceIndex,
-                          isActivePage: isCurrentPage,
-                          compactLayout: compactLayout,
-                          videoFlex: videoFlex,
-                          captionTopGap: captionTopGap,
-                          accentColor: accentColor,
-                          mediaProgress: isCurrentPage ? mediaProgress : 0,
-                          mediaCurrent:
-                              isCurrentPage ? mediaCurrent : Duration.zero,
-                          mediaTotal: isCurrentPage ? mediaTotal : Duration.zero,
-                          isAudioMode: isAudioMode,
-                          videoController: videoController,
-                          blurNonVideo: isCurrentPage && _isLessonPaging,
-                        );
+                        sentenceIndex: sentenceIndex,
+                        isActivePage: isCurrentPage,
+                        compactLayout: compactLayout,
+                        videoFlex: videoFlex,
+                        captionTopGap: captionTopGap,
+                        accentColor: accentColor,
+                        mediaProgress: isCurrentPage ? mediaProgress : 0,
+                        mediaCurrent:
+                            isCurrentPage ? mediaCurrent : Duration.zero,
+                        mediaTotal: isCurrentPage ? mediaTotal : Duration.zero,
+                        pageIsPlaying: pageIsPlaying,
+                        isAudioMode: isAudioMode,
+                        videoController: videoController,
+                        blurNonVideo: isCurrentPage && _isLessonPaging,
+                      );
                       return pageChild;
                     },
                   ),
@@ -1321,186 +1622,195 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     required double mediaProgress,
     required Duration mediaCurrent,
     required Duration mediaTotal,
+    required bool pageIsPlaying,
     required bool isAudioMode,
-    required VideoPlayerController videoController,
+    required VideoPlayerController? videoController,
     required bool blurNonVideo,
   }) {
     final sentence = _sentences[sentenceIndex];
-    final controlsOverlayVisible = isActivePage && !_isPlaying && !_isShadowingMode;
+    final pageControlsVisible = _isSentenceSwitching || !pageIsPlaying;
+    final controlsOverlayVisible =
+        isActivePage && pageControlsVisible && !_isShadowingMode;
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onHorizontalDragUpdate: isActivePage ? _onGlobalHorizontalDragUpdate : null,
+      onHorizontalDragUpdate:
+          isActivePage ? _onGlobalHorizontalDragUpdate : null,
       onHorizontalDragEnd: isActivePage ? _onGlobalHorizontalDragEnd : null,
       onHorizontalDragCancel: isActivePage ? _clearHorizontalPreview : null,
       child: Stack(
         children: [
-        Positioned.fill(
-          child: Column(
-            children: [
-              const SizedBox(height: 6),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 6, 20, 10),
-                  child: Column(
-                    children: [
-                      if (_loadWarning != null && sentenceIndex == _currentIndex)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4, bottom: 8),
-                          child: Text(
-                            _loadWarning!,
-                            style: TextStyle(
-                              color: Colors.orange.withValues(alpha: 0.9),
-                              fontSize: 12,
+          Positioned.fill(
+            child: Column(
+              children: [
+                const SizedBox(height: 6),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 6, 20, 10),
+                    child: Column(
+                      children: [
+                        if (_loadWarning != null &&
+                            sentenceIndex == _currentIndex)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4, bottom: 8),
+                            child: Text(
+                              _loadWarning!,
+                              style: TextStyle(
+                                color: Colors.orange.withValues(alpha: 0.9),
+                                fontSize: 12,
+                              ),
+                              textAlign: TextAlign.center,
                             ),
-                            textAlign: TextAlign.center,
+                          ),
+                        Expanded(
+                          flex: videoFlex,
+                          child: RepaintBoundary(
+                            child: ShortVideoVideoCard(
+                              isAudioMode: isAudioMode,
+                              progress: mediaProgress,
+                              videoController: videoController,
+                              isPlaying: pageIsPlaying,
+                              onTogglePlay: isActivePage ? _togglePlay : () {},
+                            ),
                           ),
                         ),
-                      Expanded(
-                        flex: videoFlex,
-                        child: RepaintBoundary(
-                          child: ShortVideoVideoCard(
-                            isAudioMode: isAudioMode,
-                            progress: mediaProgress,
-                            videoController: videoController,
-                            isPlaying: isActivePage && _isPlaying,
-                            onTogglePlay: isActivePage ? _togglePlay : () {},
-                          ),
-                        ),
-                      ),
-                      SizedBox(height: captionTopGap),
-                      Expanded(
-                        flex: compactLayout ? 2 : 3,
-                        child: isActivePage
-                            ? GestureDetector(
-                                behavior: HitTestBehavior.translucent,
-                                onTap: _togglePlay,
-                                child: LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    final width = constraints.maxWidth;
-                                    final dragging =
-                                        _horizontalDragOffset.abs() > 0.5;
-                                    return Stack(
-                                      children: [
-                                        if (_horizontalPreviewIndex != null)
+                        SizedBox(height: captionTopGap),
+                        Expanded(
+                          flex: compactLayout ? 2 : 3,
+                          child: isActivePage
+                              ? GestureDetector(
+                                  behavior: HitTestBehavior.translucent,
+                                  onTap: _togglePlay,
+                                  child: LayoutBuilder(
+                                    builder: (context, constraints) {
+                                      final width = constraints.maxWidth;
+                                      final dragging =
+                                          _horizontalDragOffset.abs() > 0.5;
+                                      return Stack(
+                                        children: [
+                                          if (_horizontalPreviewIndex != null)
+                                            Transform.translate(
+                                              offset: Offset(
+                                                _horizontalDragOffset < 0
+                                                    ? _horizontalDragOffset +
+                                                        width
+                                                    : _horizontalDragOffset -
+                                                        width,
+                                                0,
+                                              ),
+                                              child: _buildCaptionContent(
+                                                _sentences[
+                                                    _horizontalPreviewIndex!],
+                                                compactLayout: compactLayout,
+                                                blurNonVideo: false,
+                                              ),
+                                            ),
                                           Transform.translate(
                                             offset: Offset(
-                                              _horizontalDragOffset < 0
-                                                  ? _horizontalDragOffset + width
-                                                  : _horizontalDragOffset - width,
-                                              0,
-                                            ),
-                                            child: _buildCaptionContent(
-                                              _sentences[_horizontalPreviewIndex!],
-                                              compactLayout: compactLayout,
-                                              blurNonVideo: false,
-                                            ),
-                                          ),
-                                        Transform.translate(
-                                          offset: Offset(_horizontalDragOffset, 0),
-                                          child: _dragBlurWrapper(
-                                            dragging,
-                                            _buildCaptionContent(
-                                              sentence,
-                                              compactLayout: compactLayout,
-                                              blurNonVideo: blurNonVideo,
+                                                _horizontalDragOffset, 0),
+                                            child: _dragBlurWrapper(
+                                              dragging,
+                                              _buildCaptionContent(
+                                                sentence,
+                                                compactLayout: compactLayout,
+                                                blurNonVideo: blurNonVideo,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                      ],
-                                    );
-                                  },
+                                        ],
+                                      );
+                                    },
+                                  ),
+                                )
+                              : _buildCaptionContent(
+                                  sentence,
+                                  compactLayout: compactLayout,
+                                  blurNonVideo: blurNonVideo,
                                 ),
-                              )
-                            : _buildCaptionContent(
-                                sentence,
-                                compactLayout: compactLayout,
-                                blurNonVideo: blurNonVideo,
-                              ),
-                      ),
-                    ],
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        if (controlsOverlayVisible)
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: IgnorePointer(
-              child: ClipRect(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                  child: Container(
-                    height: MediaQuery.of(context).padding.bottom + 92,
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.06),
-                          Colors.black.withValues(alpha: 0.34),
-                        ],
+          if (controlsOverlayVisible)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                child: ClipRect(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                    child: Container(
+                      height: MediaQuery.of(context).padding.bottom + 92,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.black.withValues(alpha: 0.06),
+                            Colors.black.withValues(alpha: 0.34),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        Align(
-          alignment: Alignment.bottomCenter,
-          child: _blurWrapper(
-            blurNonVideo,
-            RepaintBoundary(
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  opacity: _safeOpacity(
-                    (isActivePage && _isPlaying) ||
-                            (_isShadowingMode && _isShadowingBusy)
-                        ? 0
-                        : 1,
-                  ),
-                  child: IgnorePointer(
-                  ignoring: !isActivePage ||
-                      _isPlaying ||
-                      (_isShadowingMode && _isShadowingBusy),
-                  child: ShortVideoBottomBar(
-                    accentColor: accentColor,
-                    progress: _isSeeking ? _seekProgress : mediaProgress,
-                    isPlaying: isActivePage && _isPlaying,
-                    isShadowingMode: _isShadowingMode,
-                    durationText:
-                        '${_formatDuration(mediaCurrent)} / ${_formatDuration(mediaTotal)}',
-                    onTogglePlay: _togglePlay,
-                    onToggleShadowingMode: _toggleShadowingMode,
-                    onCycleSubtitleMode: _cycleSubtitleMode,
-                    onOpenSettings: () => context.push(Routes.playbackSettings),
-                    onToggleFullscreen: _toggleFullscreen,
-                    subtitleIcon: _subtitleIcon(),
-                    isFullscreen: _isFullscreen,
-                    onSeekStart: _onSeekStart,
-                    onSeekUpdate: _onSeekUpdate,
-                    onSeekEnd: _onSeekEnd,
-                    onSeekTap: _onSeekTap,
+          if (isActivePage)
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: _blurWrapper(
+                blurNonVideo,
+                RepaintBoundary(
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    opacity: _safeOpacity(
+                      (!pageControlsVisible) || (_isShadowingMode && _isShadowingBusy)
+                          ? 0
+                          : 1,
+                    ),
+                    child: IgnorePointer(
+                      ignoring:
+                          !pageControlsVisible || (_isShadowingMode && _isShadowingBusy),
+                      child: ShortVideoBottomBar(
+                        accentColor: accentColor,
+                        progress: _isSeeking ? _seekProgress : mediaProgress,
+                        isPlaying: pageIsPlaying,
+                        isShadowingMode: _isShadowingMode,
+                        durationText:
+                            '${_formatDuration(mediaCurrent)} / ${_formatDuration(mediaTotal)}',
+                        onTogglePlay: _togglePlay,
+                        onToggleShadowingMode: _toggleShadowingMode,
+                        onCycleSubtitleMode: _cycleSubtitleMode,
+                        onOpenSettings: () =>
+                            context.push(Routes.playbackSettings),
+                        onToggleFullscreen: _toggleFullscreen,
+                        subtitleIcon: _subtitleIcon(),
+                        isFullscreen: _isFullscreen,
+                        onSeekStart: _onSeekStart,
+                        onSeekUpdate: _onSeekUpdate,
+                        onSeekEnd: _onSeekEnd,
+                        onSeekTap: _onSeekTap,
+                      ),
+                    ),
                   ),
                 ),
               ),
             ),
+          Positioned(
+            top: 10,
+            right: 20,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 180),
+              opacity: _safeOpacity(isActivePage && _isShadowingMode ? 1 : 0),
+              child: _buildShadowingStatusHint(),
+            ),
           ),
-        ),
-        Positioned(
-          top: 10,
-          right: 20,
-          child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 180),
-            opacity: _safeOpacity(isActivePage && _isShadowingMode ? 1 : 0),
-            child: _buildShadowingStatusHint(),
-          ),
-        ),
         ],
       ),
     );

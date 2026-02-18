@@ -29,10 +29,35 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
 
     if (resume != null) {
+      if (resume.packageRoot == LearningResumeStore.mockPackageRoot) {
+        setState(() {
+          _sentenceId = resume.sentenceId;
+          _packageRoot = null;
+          _courseTitle = resume.courseTitle;
+        });
+        return;
+      }
+      final sentenceExists = await sentenceExistsInLocalPackage(
+        packageRoot: resume.packageRoot,
+        sentenceId: resume.sentenceId,
+      );
+      if (!mounted) return;
+      if (sentenceExists) {
+        setState(() {
+          _sentenceId = resume.sentenceId;
+          _packageRoot = resume.packageRoot;
+          _courseTitle = resume.courseTitle;
+        });
+        return;
+      }
+    }
+
+    if (resume != null && localCourses.isNotEmpty) {
+      // Resume exists but is invalid; fallback to first available local course.
       setState(() {
-        _sentenceId = resume.sentenceId;
-        _packageRoot = resume.packageRoot;
-        _courseTitle = resume.courseTitle;
+        _sentenceId = localCourses.first.firstSentenceId;
+        _packageRoot = localCourses.first.packageRoot;
+        _courseTitle = localCourses.first.title;
       });
       return;
     }
