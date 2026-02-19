@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "updated_at": "2026-02-19T00:00:00Z",
+  "courses": [
+    {
+      "id": "course_courses",
+      "title": "course_courses",
+      "tags": ["全部", "视频", "入门"],
+      "level": "entry",
+      "size_bytes": 30123546,
+      "version": "1.0.0",
+      "cover_url": "",
+      "download_url": "http://home.rongts.tech:9000/courses/packages/course_courses/1.0.0/course.zip",
+      "sha256": "1da4c1f7d8d315ed7563ee7cf405ad2a1bbe99b20bd2eada61645b09423fd5a8"
+    }
+  ]
+}
