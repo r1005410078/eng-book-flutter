@@ -142,7 +142,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   double _seekProgress = 0;
   bool _isTogglingPlay = false;
   int _shadowingSessionId = 0;
-  final Duration _shadowingExtraDuration = const Duration(milliseconds: 600);
+  final Duration _shadowingExtraDuration = const Duration(milliseconds: 120);
   final AudioRecorder _audioRecorder = AudioRecorder();
 
   // Video Controls State
@@ -161,7 +161,6 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   int _currentLessonPage = 0;
   double _horizontalDragOffset = 0;
   int? _horizontalPreviewIndex;
-  int _lastHorizontalDragUpdateUs = 0;
   final Map<String, int> _lessonLastSentenceIndex = {};
   final Map<String, bool> _lessonPlayingState = {};
   final Map<String, Duration> _lessonLastMediaPosition = {};
@@ -173,6 +172,12 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   String? _loopSentenceId;
   int _remainingLoopsForSentence = 1;
   bool _isHandlingSentenceEnd = false;
+  bool _isHorizontalDragging = false;
+  bool _showBottomControls = true;
+  Timer? _controlsAutoHideTimer;
+  Timer? _controlsPauseRevealTimer;
+  static const Duration _controlsAutoHideDelay = Duration(milliseconds: 1300);
+  static const Duration _controlsFadeDuration = Duration(milliseconds: 520);
 
   @override
   void initState() {
@@ -192,6 +197,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         _isPlaying = state.playing;
         _cacheCurrentLessonPlayingState();
       });
+      _syncControlsVisibilityWithPlayback();
     });
     _audioDurationSub = _audioPlayer.durationStream.listen((duration) {
       _audioDuration = duration ?? Duration.zero;
@@ -336,6 +342,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       _currentPackageRoot = packageRoot.isEmpty ? null : packageRoot;
       _currentCourseTitle = courseTitle;
     });
+    _syncControlsVisibilityWithPlayback();
     if (packageRoot.isNotEmpty) {
       ref.read(localCourseContextProvider.notifier).state = LocalCourseContext(
         packageRoot: packageRoot,
@@ -642,6 +649,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         _isPlaying = currentPlaying;
         _cacheCurrentLessonPlayingState();
       });
+      _syncControlsVisibilityWithPlayback();
     } else {
       _cacheCurrentLessonPlayingState();
     }
@@ -783,6 +791,8 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     _audioStateSub?.cancel();
     _audioDurationSub?.cancel();
     _shadowingTicker?.cancel();
+    _controlsAutoHideTimer?.cancel();
+    _controlsPauseRevealTimer?.cancel();
     _audioPlayer.dispose();
     _audioRecorder.dispose();
     // _waveformController?.dispose(); // Waveform removed
@@ -807,7 +817,50 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   }
 
   void _onUserInteraction() {
-    // Reserved for future interaction analytics / hints.
+    if (!mounted) return;
+    _controlsAutoHideTimer?.cancel();
+    _controlsPauseRevealTimer?.cancel();
+    if (!_showBottomControls) {
+      setState(() {
+        _showBottomControls = true;
+      });
+    }
+    _scheduleControlsAutoHide();
+  }
+
+  void _scheduleControlsAutoHide() {
+    _controlsAutoHideTimer?.cancel();
+    if (!_isPlaying) return;
+    if (_isSeeking || _isHorizontalDragging || _isSentenceSwitching) return;
+    if (_isShadowingMode && _isShadowingBusy) return;
+    _controlsAutoHideTimer = Timer(_controlsAutoHideDelay, () {
+      if (!mounted) return;
+      if (!_isPlaying) return;
+      if (_isSeeking || _isHorizontalDragging || _isSentenceSwitching) return;
+      if (_isShadowingMode && _isShadowingBusy) return;
+      if (!_showBottomControls) return;
+      setState(() {
+        _showBottomControls = false;
+      });
+    });
+  }
+
+  void _syncControlsVisibilityWithPlayback() {
+    if (!mounted) return;
+    if (_isPlaying) {
+      _controlsPauseRevealTimer?.cancel();
+      _scheduleControlsAutoHide();
+      return;
+    }
+    _controlsAutoHideTimer?.cancel();
+    _controlsPauseRevealTimer?.cancel();
+    _controlsPauseRevealTimer = Timer(const Duration(milliseconds: 220), () {
+      if (!mounted || _isPlaying) return;
+      if (_showBottomControls) return;
+      setState(() {
+        _showBottomControls = true;
+      });
+    });
   }
 
   void _cycleSubtitleMode() {
@@ -893,7 +946,11 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     final sentenceDuration = sentence.endTime > sentence.startTime
         ? sentence.endTime - sentence.startTime
         : const Duration(seconds: 1);
-    final recordWindow = sentenceDuration + _shadowingExtraDuration;
+    final speed = _playbackSpeed <= 0 ? 1.0 : _playbackSpeed;
+    final alignedToPlayback = Duration(
+      milliseconds: (sentenceDuration.inMilliseconds / speed).round(),
+    );
+    final recordWindow = alignedToPlayback + _shadowingExtraDuration;
     final shouldContinue = _isPlaying;
 
     setState(() {
@@ -1027,6 +1084,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         _isPlaying = false;
         _cacheCurrentLessonPlayingState();
       });
+      _syncControlsVisibilityWithPlayback();
     } else {
       _isPlaying = false;
       _cacheCurrentLessonPlayingState();
@@ -1044,6 +1102,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         _isPlaying = true;
         _cacheCurrentLessonPlayingState();
       });
+      _syncControlsVisibilityWithPlayback();
     } else {
       _isPlaying = true;
       _cacheCurrentLessonPlayingState();
@@ -1143,6 +1202,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         _isPlaying = actualPlaying;
         _cacheCurrentLessonPlayingState();
       });
+      _syncControlsVisibilityWithPlayback();
     } finally {
       _isTogglingPlay = false;
     }
@@ -1254,6 +1314,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       _isSeeking = true;
       _seekProgress = progress.clamp(0.0, 1.0);
     });
+    _onUserInteraction();
   }
 
   void _onSeekUpdate(double progress) {
@@ -1262,6 +1323,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     setState(() {
       _seekProgress = progress.clamp(0.0, 1.0);
     });
+    _onUserInteraction();
   }
 
   Future<void> _onSeekEnd(double _) async {
@@ -1271,6 +1333,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     setState(() {
       _isSeeking = false;
     });
+    _scheduleControlsAutoHide();
     await _seekByProgress(target);
   }
 
@@ -1279,6 +1342,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     setState(() {
       _isSeeking = false;
     });
+    _onUserInteraction();
     await _seekByProgress(progress);
   }
 
@@ -1314,6 +1378,22 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     });
   }
 
+  void _settleHorizontalPreview() {
+    if (!mounted) return;
+    final hadPreview = _horizontalPreviewIndex != null;
+    setState(() {
+      _horizontalDragOffset = 0;
+    });
+    if (!hadPreview) return;
+    Future<void>.delayed(const Duration(milliseconds: 140), () {
+      if (!mounted || _isHorizontalDragging) return;
+      if (_horizontalDragOffset.abs() > 0.01) return;
+      setState(() {
+        _horizontalPreviewIndex = null;
+      });
+    });
+  }
+
   void _updateHorizontalPreview() {
     final offset = _horizontalDragOffset;
     if (offset.abs() < 8) {
@@ -1339,15 +1419,23 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     });
   }
 
+  void _onGlobalHorizontalDragStart(DragStartDetails details) {
+    if (_isShadowingMode) return;
+    _isHorizontalDragging = true;
+    _onUserInteraction();
+  }
+
   void _onGlobalHorizontalDragUpdate(DragUpdateDetails details) {
     if (_isShadowingMode) return;
-    final now = DateTime.now().microsecondsSinceEpoch;
-    if (now - _lastHorizontalDragUpdateUs < 12000) {
-      return;
-    }
-    _lastHorizontalDragUpdateUs = now;
     final width = MediaQuery.of(context).size.width;
-    final next = (_horizontalDragOffset + details.delta.dx)
+    final delta = details.delta.dx;
+    final hasNext = _currentIndex + 1 < _sentences.length;
+    final hasPrevious = _currentIndex - 1 >= 0;
+    final draggingToNext = delta < 0;
+    final blockedAtEdge =
+        (draggingToNext && !hasNext) || (!draggingToNext && !hasPrevious);
+    final adjustedDelta = blockedAtEdge ? delta * 0.45 : delta;
+    final next = (_horizontalDragOffset + adjustedDelta)
         .clamp(-width * 0.85, width * 0.85);
     setState(() {
       _horizontalDragOffset = next;
@@ -1357,11 +1445,12 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
 
   void _onGlobalHorizontalDragEnd(DragEndDetails details) {
     if (_isShadowingMode) return;
+    _isHorizontalDragging = false;
     final width = MediaQuery.of(context).size.width;
     final velocity = details.velocity.pixelsPerSecond.dx;
-    final threshold = width * 0.22;
-    final shouldNext = _horizontalDragOffset < -threshold || velocity < -450;
-    final shouldPrevious = _horizontalDragOffset > threshold || velocity > 450;
+    final threshold = width * 0.24;
+    final shouldNext = _horizontalDragOffset < -threshold || velocity < -700;
+    final shouldPrevious = _horizontalDragOffset > threshold || velocity > 700;
     if (shouldNext) {
       _clearHorizontalPreview();
       _handleNext();
@@ -1372,7 +1461,14 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       _handlePrevious();
       return;
     }
-    _clearHorizontalPreview();
+    _settleHorizontalPreview();
+    _scheduleControlsAutoHide();
+  }
+
+  void _onGlobalHorizontalDragCancel() {
+    _isHorizontalDragging = false;
+    _settleHorizontalPreview();
+    _scheduleControlsAutoHide();
   }
 
   List<int> _computeLessonStartIndices(List<SentenceDetail> sentences) {
@@ -1797,8 +1893,9 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       );
     }
     if (_sentences.isEmpty) {
-      return const Scaffold(
-        body: Center(child: Text('暂无可用句子数据')),
+      return _EmptyCourseGuideView(
+        onGoToDownloadCenter: _openDownloadCenter,
+        warning: _loadWarning,
       );
     }
 
@@ -1977,13 +2074,15 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     required bool blurNonVideo,
   }) {
     final sentence = _sentences[sentenceIndex];
-    final pageControlsVisible = _isSentenceSwitching || !pageIsPlaying;
+    final pageControlsVisible = isActivePage && _showBottomControls;
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
+      onHorizontalDragStart: isActivePage ? _onGlobalHorizontalDragStart : null,
       onHorizontalDragUpdate:
           isActivePage ? _onGlobalHorizontalDragUpdate : null,
       onHorizontalDragEnd: isActivePage ? _onGlobalHorizontalDragEnd : null,
-      onHorizontalDragCancel: isActivePage ? _clearHorizontalPreview : null,
+      onHorizontalDragCancel:
+          isActivePage ? _onGlobalHorizontalDragCancel : null,
       child: Stack(
         children: [
           Positioned.fill(
@@ -1991,25 +2090,25 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
               children: [
                 const SizedBox(height: 6),
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 6, 20, 18),
-                    child: Column(
-                      children: [
-                        if (_loadWarning != null &&
-                            sentenceIndex == _currentIndex)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4, bottom: 8),
-                            child: Text(
-                              _loadWarning!,
-                              style: TextStyle(
-                                color: Colors.orange.withValues(alpha: 0.9),
-                                fontSize: 12,
-                              ),
-                              textAlign: TextAlign.center,
+                  child: Column(
+                    children: [
+                      if (_loadWarning != null &&
+                          sentenceIndex == _currentIndex)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                          child: Text(
+                            _loadWarning!,
+                            style: TextStyle(
+                              color: Colors.orange.withValues(alpha: 0.9),
+                              fontSize: 12,
                             ),
+                            textAlign: TextAlign.center,
                           ),
-                        Expanded(
-                          flex: videoFlex,
+                        ),
+                      Expanded(
+                        flex: videoFlex,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
                           child: RepaintBoundary(
                             child: ShortVideoVideoCard(
                               isAudioMode: isAudioMode,
@@ -2020,62 +2119,101 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
                             ),
                           ),
                         ),
-                        SizedBox(height: captionTopGap),
-                        Expanded(
-                          flex: compactLayout ? 2 : 3,
-                          child: isActivePage
-                              ? GestureDetector(
-                                  behavior: HitTestBehavior.translucent,
-                                  onTap: _togglePlay,
-                                  child: LayoutBuilder(
-                                    builder: (context, constraints) {
-                                      final width = constraints.maxWidth;
-                                      final dragging =
-                                          _horizontalDragOffset.abs() > 0.5;
-                                      return Stack(
-                                        children: [
-                                          if (_horizontalPreviewIndex != null)
-                                            Transform.translate(
-                                              offset: Offset(
-                                                _horizontalDragOffset < 0
-                                                    ? _horizontalDragOffset +
-                                                        width
-                                                    : _horizontalDragOffset -
-                                                        width,
-                                                0,
-                                              ),
-                                              child: _buildCaptionContent(
-                                                _sentences[
-                                                    _horizontalPreviewIndex!],
-                                                compactLayout: compactLayout,
-                                                blurNonVideo: false,
-                                              ),
-                                            ),
+                      ),
+                      SizedBox(height: captionTopGap),
+                      Expanded(
+                        flex: compactLayout ? 2 : 3,
+                        child: isActivePage
+                            ? GestureDetector(
+                                behavior: HitTestBehavior.translucent,
+                                onTap: _togglePlay,
+                                child: LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final width = constraints.maxWidth;
+                                    final dragging =
+                                        _horizontalDragOffset.abs() > 0.5;
+                                    final dragProgress = width <= 0
+                                        ? 0.0
+                                        : (_horizontalDragOffset.abs() /
+                                                (width * 0.32))
+                                            .clamp(0.0, 1.0);
+                                    final currentOpacity =
+                                        (1.0 - (dragProgress * 0.24))
+                                            .clamp(0.0, 1.0)
+                                            .toDouble();
+                                    final previewOpacity =
+                                        (0.22 + (dragProgress * 0.78))
+                                            .clamp(0.0, 1.0)
+                                            .toDouble();
+                                    final currentScale =
+                                        (1.0 - (dragProgress * 0.015))
+                                            .clamp(0.98, 1.0)
+                                            .toDouble();
+                                    final previewScale =
+                                        (0.99 + (dragProgress * 0.01))
+                                            .clamp(0.99, 1.0)
+                                            .toDouble();
+                                    return Stack(
+                                      children: [
+                                        if (_horizontalPreviewIndex != null)
                                           Transform.translate(
                                             offset: Offset(
-                                                _horizontalDragOffset, 0),
-                                            child: _dragBlurWrapper(
-                                              dragging,
-                                              _buildCaptionContent(
-                                                sentence,
-                                                compactLayout: compactLayout,
-                                                blurNonVideo: blurNonVideo,
+                                              _horizontalDragOffset < 0
+                                                  ? _horizontalDragOffset +
+                                                      width
+                                                  : _horizontalDragOffset -
+                                                      width,
+                                              0,
+                                            ),
+                                            child: Opacity(
+                                              opacity: _safeOpacity(
+                                                previewOpacity,
+                                              ),
+                                              child: Transform.scale(
+                                                alignment: Alignment.center,
+                                                scale: previewScale,
+                                                child: _buildCaptionContent(
+                                                  _sentences[
+                                                      _horizontalPreviewIndex!],
+                                                  compactLayout: compactLayout,
+                                                  blurNonVideo: false,
+                                                ),
                                               ),
                                             ),
                                           ),
-                                        ],
-                                      );
-                                    },
-                                  ),
-                                )
-                              : _buildCaptionContent(
-                                  sentence,
-                                  compactLayout: compactLayout,
-                                  blurNonVideo: blurNonVideo,
+                                        Transform.translate(
+                                          offset:
+                                              Offset(_horizontalDragOffset, 0),
+                                          child: Opacity(
+                                            opacity: _safeOpacity(
+                                              currentOpacity,
+                                            ),
+                                            child: Transform.scale(
+                                              alignment: Alignment.center,
+                                              scale: currentScale,
+                                              child: _dragBlurWrapper(
+                                                dragging,
+                                                _buildCaptionContent(
+                                                  sentence,
+                                                  compactLayout: compactLayout,
+                                                  blurNonVideo: blurNonVideo,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  },
                                 ),
-                        ),
-                      ],
-                    ),
+                              )
+                            : _buildCaptionContent(
+                                sentence,
+                                compactLayout: compactLayout,
+                                blurNonVideo: blurNonVideo,
+                              ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -2088,8 +2226,8 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
                 blurNonVideo,
                 RepaintBoundary(
                   child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOut,
+                    duration: _controlsFadeDuration,
+                    curve: Curves.easeOutCubic,
                     opacity: _safeOpacity(
                       (!pageControlsVisible) ||
                               (_isShadowingMode && _isShadowingBusy)
@@ -2401,6 +2539,211 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     final v = value.toDouble();
     if (!v.isFinite) return 1.0;
     return v.clamp(0.0, 1.0).toDouble();
+  }
+}
+
+class _EmptyCourseGuideView extends StatelessWidget {
+  final VoidCallback onGoToDownloadCenter;
+  final String? warning;
+
+  const _EmptyCourseGuideView({
+    required this.onGoToDownloadCenter,
+    this.warning,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const titleColor = Color(0xFFF5F5F2);
+    const subtitleColor = Color(0xFFD6D7DB);
+    const highlightColor = Color(0xFFF9C431);
+    const iconColor = Color(0xFFD5C995);
+    const buttonColor = Color(0xFFEC9000);
+
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(color: Color(0xFF0C0C10)),
+        child: Stack(
+          children: [
+            const Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment(0, -1.1),
+                    end: Alignment(0, 1.0),
+                    colors: [
+                      Color(0xFF656A60),
+                      Color(0xFF8D7A5F),
+                      Color(0xFF171923),
+                      Color(0xFF09090D),
+                    ],
+                    stops: [0.0, 0.44, 0.77, 1.0],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: -90,
+              top: -80,
+              child: IgnorePointer(
+                child: Container(
+                  width: 320,
+                  height: 320,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFFCED1C4).withValues(alpha: 0.12),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: -120,
+              top: -40,
+              child: IgnorePointer(
+                child: Container(
+                  width: 380,
+                  height: 380,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0xFFCCB48F).withValues(alpha: 0.2),
+                  ),
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.2),
+                      Colors.black.withValues(alpha: 0.62),
+                    ],
+                    stops: const [0.28, 0.62, 1.0],
+                  ),
+                ),
+              ),
+            ),
+            SafeArea(
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+                child: Column(
+                  children: [
+                    const Spacer(flex: 7),
+                    Icon(
+                      Icons.lightbulb_outline_rounded,
+                      size: 48,
+                      color: iconColor.withValues(alpha: 0.96),
+                    ),
+                    const SizedBox(height: 34),
+                    Text(
+                      '开启你的',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: titleColor,
+                        fontSize: 38 / 2,
+                        height: 1.25,
+                        fontWeight: FontWeight.w800,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black.withValues(alpha: 0.45),
+                            blurRadius: 16,
+                            offset: const Offset(0, 7),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      '语言学习之旅',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: highlightColor,
+                        fontSize: 33,
+                        height: 1.15,
+                        fontWeight: FontWeight.w900,
+                        shadows: [
+                          Shadow(
+                            color: Color(0xCC000000),
+                            blurRadius: 18,
+                            offset: Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 44),
+                    Text(
+                      '基于 Krashen 可理解输入与 100LS 训练法',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: subtitleColor.withValues(alpha: 0.94),
+                        fontSize: 21,
+                        height: 1.4,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      width: 92,
+                      height: 2,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(999),
+                        color: const Color(0xFFC58A1C).withValues(alpha: 0.9),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      '带你进入沉浸式学习心流',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: subtitleColor.withValues(alpha: 0.9),
+                        fontSize: 20,
+                        height: 1.5,
+                      ),
+                    ),
+                    if (warning != null && warning!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        warning!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.52),
+                          fontSize: 12,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                    const Spacer(flex: 3),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 68,
+                      child: FilledButton(
+                        onPressed: onGoToDownloadCenter,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: buttonColor,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                          elevation: 0,
+                          textStyle: const TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        child: const Text('前往下载中心'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

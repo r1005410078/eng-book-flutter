@@ -289,6 +289,12 @@ class PlaybackSettingsScreen extends ConsumerWidget {
       PlaybackCompletionMode.pauseAfterFinish: '播放完暂停',
       PlaybackCompletionMode.allCoursesLoop: '所有课程循环',
     };
+    final modeIcons = <PlaybackCompletionMode, IconData>{
+      PlaybackCompletionMode.unitLoop: Icons.repeat,
+      PlaybackCompletionMode.courseLoop: Icons.menu_book_rounded,
+      PlaybackCompletionMode.pauseAfterFinish: Icons.pause_circle_outline,
+      PlaybackCompletionMode.allCoursesLoop: Icons.all_inclusive_rounded,
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -367,45 +373,48 @@ class PlaybackSettingsScreen extends ConsumerWidget {
                         fontSize: 14,
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: PlaybackCompletionMode.values.map((mode) {
-                        final selected = settings.completionMode == mode;
-                        return GestureDetector(
-                          onTap: () => controller.setCompletionMode(mode),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: selected
-                                  ? accentColor.withValues(alpha: 0.22)
-                                  : Colors.white.withValues(alpha: 0.04),
-                              borderRadius: BorderRadius.circular(9),
-                              border: Border.all(
-                                color: selected
-                                    ? accentColor.withValues(alpha: 0.75)
-                                    : Colors.white.withValues(alpha: 0.08),
+                    const SizedBox(height: 12),
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final itemWidth = (constraints.maxWidth - 8) / 2;
+                        return Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: PlaybackCompletionMode.values.map((mode) {
+                            final selected = settings.completionMode == mode;
+                            return SizedBox(
+                              width: itemWidth,
+                              child: GestureDetector(
+                                onTap: () => controller.setCompletionMode(mode),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 130),
+                                  curve: Curves.easeOut,
+                                  height: 44,
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? accentColor.withValues(alpha: 0.2)
+                                        : Colors.white.withValues(alpha: 0.04),
+                                    borderRadius: BorderRadius.circular(11),
+                                    border: Border.all(
+                                      color: selected
+                                          ? accentColor.withValues(alpha: 0.72)
+                                          : Colors.white
+                                              .withValues(alpha: 0.08),
+                                    ),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: _buildCompletionModeChip(
+                                    selected: selected,
+                                    icon: modeIcons[mode]!,
+                                    label: modeLabels[mode]!,
+                                    accentColor: accentColor,
+                                  ),
+                                ),
                               ),
-                            ),
-                            child: Text(
-                              modeLabels[mode]!,
-                              style: TextStyle(
-                                color: selected
-                                    ? accentColor
-                                    : Colors.white.withValues(alpha: 0.78),
-                                fontSize: 13,
-                                fontWeight: selected
-                                    ? FontWeight.w600
-                                    : FontWeight.w500,
-                              ),
-                            ),
-                          ),
+                            );
+                          }).toList(),
                         );
-                      }).toList(),
+                      },
                     ),
                   ],
                 ),
@@ -419,6 +428,35 @@ class PlaybackSettingsScreen extends ConsumerWidget {
                 accentColor: accentColor,
               ),
             ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCompletionModeChip({
+    required bool selected,
+    required IconData icon,
+    required String label,
+    required Color accentColor,
+  }) {
+    final color = selected ? accentColor : Colors.white.withValues(alpha: 0.78);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: color,
+              fontSize: 15,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            ),
           ),
         ),
       ],

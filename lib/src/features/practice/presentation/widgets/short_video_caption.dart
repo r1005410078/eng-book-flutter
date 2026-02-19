@@ -48,8 +48,8 @@ class _ShortVideoCaptionState extends State<ShortVideoCaption> {
         widget.showChinese &&
         !_translationRevealed;
 
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 680),
+    return SizedBox(
+      width: double.infinity,
       child: Column(
         children: [
           if (widget.showEnglish)
