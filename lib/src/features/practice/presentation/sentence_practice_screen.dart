@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:video_player/video_player.dart';
 import '../application/local_course_provider.dart';
+import '../data/learning_metrics_store.dart';
 import '../data/local_course_package_loader.dart';
 import '../data/learning_resume_store.dart';
 import '../domain/sentence_detail.dart';
@@ -24,16 +25,79 @@ enum SubtitleMode { bilingual, englishOnly, hidden }
 
 enum ShadowingPhase { idle, listening, recording, advancing }
 
+class _CourseUnitPickerUnit {
+  final String lessonKey;
+  final String lessonId;
+  final String lessonTitle;
+  final String firstSentenceId;
+  final int sentenceCount;
+  final int practiceCount;
+  final double progressPercent;
+  final int proficiency;
+  final PracticeStatus status;
+
+  const _CourseUnitPickerUnit({
+    required this.lessonKey,
+    required this.lessonId,
+    required this.lessonTitle,
+    required this.firstSentenceId,
+    required this.sentenceCount,
+    required this.practiceCount,
+    required this.progressPercent,
+    required this.proficiency,
+    required this.status,
+  });
+}
+
+class _CourseUnitPickerCourse {
+  final String packageRoot;
+  final String courseTitle;
+  final List<_CourseUnitPickerUnit> units;
+  final int practiceCount;
+  final double progressPercent;
+  final int proficiency;
+
+  const _CourseUnitPickerCourse({
+    required this.packageRoot,
+    required this.courseTitle,
+    required this.units,
+    required this.practiceCount,
+    required this.progressPercent,
+    required this.proficiency,
+  });
+}
+
+class _CourseUnitPickerSelection {
+  final String packageRoot;
+  final String courseTitle;
+  final String lessonKey;
+  final String firstSentenceId;
+
+  const _CourseUnitPickerSelection({
+    required this.packageRoot,
+    required this.courseTitle,
+    required this.lessonKey,
+    required this.firstSentenceId,
+  });
+}
+
 class SentencePracticeScreen extends ConsumerStatefulWidget {
   final String sentenceId;
   final String? packageRoot;
   final String? courseTitle;
+  final Future<LocalSentenceLoadResult> Function(String packageRoot)?
+      loadSentencesOverride;
+  final Future<List<LocalCourseCatalog>> Function()? loadCourseCatalogsOverride;
+  final bool skipMediaSetupForTest;
 
   const SentencePracticeScreen({
     super.key,
     required this.sentenceId,
     this.packageRoot,
     this.courseTitle,
+    this.loadSentencesOverride,
+    this.loadCourseCatalogsOverride,
+    this.skipMediaSetupForTest = false,
   });
 
   @override
@@ -97,6 +161,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   final Map<String, Duration> _lessonLastMediaDuration = {};
   final Map<int, VideoPlayerController> _previewControllerCache = {};
   final Set<int> _previewControllerLoading = {};
+  String? _lastRecordedLessonKey;
 
   @override
   void initState() {
@@ -134,13 +199,25 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       'COURSE_PACKAGE_DIR',
       defaultValue: '',
     );
-    final providerRoot = ref.read(localCourseContextProvider)?.packageRoot;
+    final providerContext = ref.read(localCourseContextProvider);
+    final providerRoot = providerContext?.packageRoot;
     final packageRoot = widget.packageRoot ?? providerRoot ?? definedRoot;
-    final courseTitleInput =
-        widget.courseTitle ?? ref.read(localCourseContextProvider)?.courseTitle;
+    final courseTitleInput = widget.courseTitle ?? providerContext?.courseTitle;
+    await _loadCourseContent(
+      packageRoot: packageRoot,
+      courseTitleInput: courseTitleInput,
+      targetSentenceId: widget.sentenceId,
+    );
+  }
 
+  Future<void> _loadCourseContent({
+    required String packageRoot,
+    String? courseTitleInput,
+    required String targetSentenceId,
+  }) async {
     final loaded = packageRoot.isNotEmpty
-        ? await loadSentencesFromLocalPackage(packageRoot: packageRoot)
+        ? await (widget.loadSentencesOverride?.call(packageRoot) ??
+            loadSentencesFromLocalPackage(packageRoot: packageRoot))
         : await ref.read(localCourseSentencesProvider.future);
     final list = loaded.sentences;
     final warning = loaded.warning;
@@ -160,7 +237,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       return;
     }
 
-    final index = list.indexWhere((s) => s.id == widget.sentenceId);
+    final index = list.indexWhere((s) => s.id == targetSentenceId);
     final targetIndex = index != -1 ? index : 0;
     final lessonStarts = _computeLessonStartIndices(list);
     final targetLessonPage =
@@ -169,6 +246,13 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     final mediaType = list[targetIndex].mediaType;
     final courseTitle =
         courseTitleInput ?? list[targetIndex].courseTitle ?? '本地课程';
+
+    _clearPreviewControllerCache();
+    _lessonLastSentenceIndex.clear();
+    _lessonPlayingState.clear();
+    _lessonLastMediaPosition.clear();
+    _lessonLastMediaDuration.clear();
+    _lastRecordedLessonKey = null;
 
     await _switchMedia(
       mediaPath,
@@ -189,8 +273,15 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       _currentPackageRoot = packageRoot.isEmpty ? null : packageRoot;
       _currentCourseTitle = courseTitle;
     });
+    if (packageRoot.isNotEmpty) {
+      ref.read(localCourseContextProvider.notifier).state = LocalCourseContext(
+        packageRoot: packageRoot,
+        courseTitle: courseTitle,
+      );
+    }
     _lessonLastSentenceIndex[_lessonKeyAt(targetIndex)] = targetIndex;
     _cacheCurrentLessonPlayingState();
+    unawaited(_recordPracticeForIndex(targetIndex, countLessonEntry: true));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_lessonPageController.hasClients) return;
       _isProgrammaticPageJump = true;
@@ -207,6 +298,10 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     Duration? seekTo,
     int? requestToken,
   }) async {
+    if (widget.skipMediaSetupForTest) {
+      _currentMediaPath = (mediaPath ?? '').trim();
+      return;
+    }
     bool isActiveRequest() =>
         requestToken == null || requestToken == _seekRequestToken;
     final path = (mediaPath ?? '').trim();
@@ -400,6 +495,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
           });
           _lessonLastSentenceIndex[_lessonKeyAt(i)] = i;
           unawaited(_persistLearningResume());
+          unawaited(_recordPracticeForIndex(i));
         }
         break;
       }
@@ -431,6 +527,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
           });
           _lessonLastSentenceIndex[_lessonKeyAt(i)] = i;
           unawaited(_persistLearningResume());
+          unawaited(_recordPracticeForIndex(i));
         }
         break;
       }
@@ -1332,6 +1429,10 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
 
   Future<void> _seekToSentence(int index) async {
     if (index < 0 || index >= _sentences.length) return;
+    final previousLessonKey =
+        (_currentIndex >= 0 && _currentIndex < _sentences.length)
+            ? _lessonKeyAt(_currentIndex)
+            : null;
     final requestToken = ++_seekRequestToken;
     final s = _sentences[index];
     setState(() {
@@ -1379,6 +1480,12 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       _lessonLastSentenceIndex[_lessonKeyAt(index)] = index;
       _cacheCurrentLessonPlayingState();
       _syncLessonPageWithCurrentSentence();
+      final targetLessonKey = _lessonKeyAt(index);
+      final lessonChanged = previousLessonKey != targetLessonKey;
+      await _recordPracticeForIndex(
+        index,
+        countLessonEntry: lessonChanged,
+      );
       await _persistLearningResume();
       unawaited(_warmAdjacentLessonPreviews());
       // _audioPlayer.seek(s.startTime); // Not using separate audio
@@ -1411,6 +1518,39 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         sentenceId: sentence.id,
         lessonId: sentence.lessonId,
       ),
+    );
+  }
+
+  Future<void> _recordPracticeForIndex(
+    int index, {
+    bool countLessonEntry = false,
+  }) async {
+    if (index < 0 || index >= _sentences.length) return;
+    final sentence = _sentences[index];
+    final packageRoot =
+        (_currentPackageRoot ?? sentence.packageRoot ?? '').trim();
+    if (packageRoot.isEmpty) return;
+    final lessonKey = _lessonKeyAt(index);
+    if (lessonKey.isEmpty) return;
+
+    if (countLessonEntry && _lastRecordedLessonKey != lessonKey) {
+      final bounds = _lessonBoundsForIndex(index);
+      await LearningMetricsStore.recordLessonEntry(
+        packageRoot: packageRoot,
+        lessonKey: lessonKey,
+        totalCourseSentences: _sentences.length,
+        totalLessonSentences: (bounds.end - bounds.start) + 1,
+      );
+      _lastRecordedLessonKey = lessonKey;
+    }
+
+    final bounds = _lessonBoundsForIndex(index);
+    await LearningMetricsStore.recordSentencePractice(
+      packageRoot: packageRoot,
+      lessonKey: lessonKey,
+      sentenceId: sentence.id,
+      totalCourseSentences: _sentences.length,
+      totalLessonSentences: (bounds.end - bounds.start) + 1,
     );
   }
 
@@ -1518,6 +1658,9 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
               child: ShortVideoHeader(
                 currentIndex: lessonProgress.indexInLesson - 1,
                 total: lessonProgress.totalInLesson,
+                courseTitle: _headerCourseTitle(),
+                lessonTitle: _headerLessonTitle(),
+                onTapCourseUnitPicker: _openCourseUnitPicker,
                 onOpenDownloadCenter: _openDownloadCenter,
               ),
             ),
@@ -1831,6 +1974,228 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     context.push(Routes.downloadCenter);
   }
 
+  String _courseUnitKey({
+    required String packageRoot,
+    String? lessonId,
+    String? lessonTitle,
+    String? mediaPath,
+  }) {
+    final scope = 'pkg:$packageRoot';
+    final safeLessonId = (lessonId ?? '').trim();
+    if (safeLessonId.isNotEmpty) return '$scope|lesson:$safeLessonId';
+    final safeLessonTitle = (lessonTitle ?? '').trim();
+    if (safeLessonTitle.isNotEmpty) return '$scope|title:$safeLessonTitle';
+    final safeMediaPath = (mediaPath ?? '').trim();
+    if (safeMediaPath.isNotEmpty) return '$scope|media:$safeMediaPath';
+    return '$scope|default';
+  }
+
+  List<_CourseUnitPickerUnit> _buildUnitOptionsFromSentences(
+    List<SentenceDetail> sentences,
+    String packageRoot,
+    LearningMetricsSnapshot metricsSnapshot,
+  ) {
+    if (sentences.isEmpty) return const [];
+    final units = <_CourseUnitPickerUnit>[];
+    int start = 0;
+    while (start < sentences.length) {
+      final startSentence = sentences[start];
+      final key = _lessonKeyFromSentence(startSentence);
+      int end = start;
+      while (end + 1 < sentences.length &&
+          _lessonKeyFromSentence(sentences[end + 1]) == key) {
+        end++;
+      }
+      final lessonId = (startSentence.lessonId ?? '').trim();
+      final lessonTitle = (startSentence.lessonTitle ?? '').trim();
+      final displayTitle = lessonTitle.isNotEmpty
+          ? lessonTitle
+          : (lessonId.isNotEmpty ? '单元 $lessonId' : '单元 ${units.length + 1}');
+      final unitMetrics = metricsSnapshot.unitView(
+        packageRoot,
+        key,
+        totalSentenceCount: end - start + 1,
+      );
+      units.add(
+        _CourseUnitPickerUnit(
+          lessonKey: key,
+          lessonId: lessonId,
+          lessonTitle: displayTitle,
+          firstSentenceId: startSentence.id,
+          sentenceCount: end - start + 1,
+          practiceCount: unitMetrics.practiceCount,
+          progressPercent: unitMetrics.progressPercent,
+          proficiency: unitMetrics.proficiency,
+          status: unitMetrics.status,
+        ),
+      );
+      start = end + 1;
+    }
+    return units;
+  }
+
+  Future<List<_CourseUnitPickerCourse>> _loadCourseUnitPickerCourses() async {
+    final currentPackage = (_currentPackageRoot ??
+            (_sentences.isNotEmpty
+                ? _sentences[_currentIndex].packageRoot
+                : null) ??
+            '')
+        .trim();
+    final currentCourseTitle = (_currentCourseTitle ??
+            (_sentences.isNotEmpty
+                ? _sentences[_currentIndex].courseTitle
+                : null) ??
+            '本地课程')
+        .trim();
+    final map = <String, _CourseUnitPickerCourse>{};
+    final metricsSnapshot = await LearningMetricsStore.loadSnapshot();
+
+    final catalogs = await (widget.loadCourseCatalogsOverride?.call() ??
+        listLocalCourseCatalogs());
+    for (final catalog in catalogs) {
+      final root = catalog.packageRoot.trim();
+      if (root.isEmpty || catalog.units.isEmpty) continue;
+      final courseTotalSentences = catalog.units.fold<int>(
+        0,
+        (sum, unit) => sum + unit.sentenceCount,
+      );
+      final courseMetrics = metricsSnapshot.courseView(
+        root,
+        totalSentenceCount: courseTotalSentences,
+      );
+      final units = catalog.units.map((unit) {
+        final lessonKey = _courseUnitKey(
+          packageRoot: root,
+          lessonId: unit.lessonId,
+          lessonTitle: unit.title,
+        );
+        final unitMetrics = metricsSnapshot.unitView(
+          root,
+          lessonKey,
+          totalSentenceCount: unit.sentenceCount,
+        );
+        return _CourseUnitPickerUnit(
+          lessonKey: lessonKey,
+          lessonId: unit.lessonId,
+          lessonTitle: unit.title,
+          firstSentenceId: unit.firstSentenceId,
+          sentenceCount: unit.sentenceCount,
+          practiceCount: unitMetrics.practiceCount,
+          progressPercent: unitMetrics.progressPercent,
+          proficiency: unitMetrics.proficiency,
+          status: unitMetrics.status,
+        );
+      }).toList();
+      map[root] = _CourseUnitPickerCourse(
+        packageRoot: root,
+        courseTitle: catalog.title,
+        units: units,
+        practiceCount: courseMetrics.practiceCount,
+        progressPercent: courseMetrics.progressPercent,
+        proficiency: courseMetrics.proficiency,
+      );
+    }
+
+    if (currentPackage.isNotEmpty && _sentences.isNotEmpty) {
+      final units = _buildUnitOptionsFromSentences(
+        _sentences,
+        currentPackage,
+        metricsSnapshot,
+      );
+      final courseMetrics = metricsSnapshot.courseView(
+        currentPackage,
+        totalSentenceCount: _sentences.length,
+      );
+      map[currentPackage] = _CourseUnitPickerCourse(
+        packageRoot: currentPackage,
+        courseTitle: currentCourseTitle,
+        units: units,
+        practiceCount: courseMetrics.practiceCount,
+        progressPercent: courseMetrics.progressPercent,
+        proficiency: courseMetrics.proficiency,
+      );
+    }
+
+    final courses = map.values.toList();
+    courses.sort((a, b) {
+      if (a.packageRoot == currentPackage) return -1;
+      if (b.packageRoot == currentPackage) return 1;
+      return a.courseTitle.compareTo(b.courseTitle);
+    });
+    return courses;
+  }
+
+  Future<void> _openCourseUnitPicker() async {
+    if (_sentences.isEmpty) return;
+    final courses = await _loadCourseUnitPickerCourses();
+    if (!mounted || courses.isEmpty) return;
+    final currentPackage =
+        (_currentPackageRoot ?? _sentences[_currentIndex].packageRoot ?? '')
+            .trim();
+    final currentLessonKey = _lessonKeyAt(_currentIndex);
+
+    final selection = await showModalBottomSheet<_CourseUnitPickerSelection>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      enableDrag: true,
+      isDismissible: true,
+      showDragHandle: true,
+      backgroundColor: const Color(0xFF1a120b),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.94,
+      ),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+      ),
+      builder: (_) => _CourseUnitPickerSheet(
+        courses: courses,
+        currentPackageRoot: currentPackage,
+        currentLessonKey: currentLessonKey,
+      ),
+    );
+    if (selection == null || !mounted) return;
+
+    final targetPackage = selection.packageRoot.trim();
+    if (targetPackage == currentPackage) {
+      final remembered = _lessonLastSentenceIndex[selection.lessonKey];
+      final targetIndex = remembered != null &&
+              remembered >= 0 &&
+              remembered < _sentences.length &&
+              _lessonKeyAt(remembered) == selection.lessonKey
+          ? remembered
+          : _sentences.indexWhere(
+              (s) => _lessonKeyFromSentence(s) == selection.lessonKey,
+            );
+      if (targetIndex >= 0 && targetIndex != _currentIndex) {
+        await _seekToSentence(targetIndex);
+      }
+      return;
+    }
+
+    await _loadCourseContent(
+      packageRoot: targetPackage,
+      courseTitleInput: selection.courseTitle,
+      targetSentenceId: selection.firstSentenceId,
+    );
+  }
+
+  String _headerCourseTitle() {
+    if (_sentences.isEmpty) return _currentCourseTitle ?? '本地课程';
+    final sentence = _sentences[_currentIndex];
+    return (_currentCourseTitle ?? sentence.courseTitle ?? '本地课程').trim();
+  }
+
+  String _headerLessonTitle() {
+    if (_sentences.isEmpty) return '单元';
+    final sentence = _sentences[_currentIndex];
+    final lessonTitle = (sentence.lessonTitle ?? '').trim();
+    if (lessonTitle.isNotEmpty) return lessonTitle;
+    final lessonId = (sentence.lessonId ?? '').trim();
+    if (lessonId.isNotEmpty) return '单元 $lessonId';
+    return '单元 ${(_currentLessonPage + 1).toString().padLeft(2, '0')}';
+  }
+
   Future<void> _openPlaybackSettings() async {
     if (!mounted) return;
     final height = MediaQuery.of(context).size.height;
@@ -1861,5 +2226,391 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     final v = value.toDouble();
     if (!v.isFinite) return 1.0;
     return v.clamp(0.0, 1.0).toDouble();
+  }
+}
+
+class _CourseUnitPickerSheet extends StatefulWidget {
+  final List<_CourseUnitPickerCourse> courses;
+  final String currentPackageRoot;
+  final String currentLessonKey;
+
+  const _CourseUnitPickerSheet({
+    required this.courses,
+    required this.currentPackageRoot,
+    required this.currentLessonKey,
+  });
+
+  @override
+  State<_CourseUnitPickerSheet> createState() => _CourseUnitPickerSheetState();
+}
+
+class _CourseUnitPickerSheetState extends State<_CourseUnitPickerSheet> {
+  late String _selectedPackageRoot;
+  String? _selectedLessonKey;
+
+  String _unitStatusLabel(PracticeStatus status) {
+    return switch (status) {
+      PracticeStatus.notStarted => '未开始',
+      PracticeStatus.inProgress => '学习中',
+      PracticeStatus.completed => '已完成',
+    };
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final exists = widget.courses.any(
+      (course) => course.packageRoot == widget.currentPackageRoot,
+    );
+    _selectedPackageRoot =
+        exists ? widget.currentPackageRoot : widget.courses.first.packageRoot;
+    _selectedLessonKey = widget.currentLessonKey;
+  }
+
+  _CourseUnitPickerUnit? _selectedUnitForCourse(
+      _CourseUnitPickerCourse course) {
+    if (course.units.isEmpty) return null;
+    final selected = _selectedLessonKey;
+    if (selected != null) {
+      for (final unit in course.units) {
+        if (unit.lessonKey == selected) return unit;
+      }
+    }
+    return course.units.first;
+  }
+
+  Color _statusColor(PracticeStatus status) {
+    return switch (status) {
+      PracticeStatus.completed => const Color(0xFF48D48A),
+      PracticeStatus.inProgress => const Color(0xFFFFA726),
+      PracticeStatus.notStarted => Colors.white.withValues(alpha: 0.35),
+    };
+  }
+
+  Widget _statusTrailing(PracticeStatus status, {required bool selected}) {
+    if (status == PracticeStatus.completed) {
+      return Icon(
+        Icons.check_circle_rounded,
+        size: 28,
+        color: const Color(0xFF48D48A).withValues(alpha: selected ? 1 : 0.92),
+      );
+    }
+    if (status == PracticeStatus.inProgress) {
+      return Container(
+        width: 12,
+        height: 12,
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFA726),
+          borderRadius: BorderRadius.circular(6),
+        ),
+      );
+    }
+    return Icon(
+      Icons.radio_button_unchecked_rounded,
+      size: 18,
+      color: Colors.white.withValues(alpha: 0.34),
+    );
+  }
+
+  void _confirmSelection(_CourseUnitPickerCourse selectedCourse) {
+    final selectedUnit = _selectedUnitForCourse(selectedCourse);
+    if (selectedUnit == null) return;
+    Navigator.of(context).pop(
+      _CourseUnitPickerSelection(
+        packageRoot: selectedCourse.packageRoot,
+        courseTitle: selectedCourse.courseTitle,
+        lessonKey: selectedUnit.lessonKey,
+        firstSentenceId: selectedUnit.firstSentenceId,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+    final selectedCourse = widget.courses.firstWhere(
+      (course) => course.packageRoot == _selectedPackageRoot,
+      orElse: () => widget.courses.first,
+    );
+    final selectedUnit = _selectedUnitForCourse(selectedCourse);
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(0, 0, 0, bottomInset),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(height: 14),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 22),
+            child: Text(
+              'COURSE CATALOG',
+              style: TextStyle(
+                color: const Color(0xFFB47A23).withValues(alpha: 0.85),
+                fontSize: 12,
+                letterSpacing: 2.0,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 56,
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 22),
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
+              ),
+              primary: false,
+              itemCount: widget.courses.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, index) {
+                final course = widget.courses[index];
+                final selected = course.packageRoot == _selectedPackageRoot;
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    if (selected) return;
+                    setState(() {
+                      _selectedPackageRoot = course.packageRoot;
+                      _selectedLessonKey = null;
+                    });
+                  },
+                  child: Container(
+                    width: 182,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? const Color(0xFF2A1D10)
+                          : const Color(0xFF19110B),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: selected
+                            ? const Color(0xFF8A581A)
+                            : Colors.white.withValues(alpha: 0.09),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.circle,
+                              size: 12,
+                              color: selected
+                                  ? const Color(0xFFFFA726)
+                                  : const Color(0xFF4ADE80),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                course.courseTitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: selected
+                                      ? const Color(0xFFFFB239)
+                                      : const Color(0xFFB47A23),
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${course.practiceCount} 次 · ${course.progressPercent.round()}% · 熟练度 ${course.proficiency}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.46),
+                            fontSize: 9,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(height: 1, color: const Color(0xFF3A2611)),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 22),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${selectedCourse.courseTitle} — 单元',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFFFFB02E),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Text(
+                  '● 已完成',
+                  style: TextStyle(
+                    color: _statusColor(PracticeStatus.completed),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  '● 当前在学',
+                  style: TextStyle(
+                    color: _statusColor(PracticeStatus.inProgress),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 22),
+              itemCount: selectedCourse.units.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                final unit = selectedCourse.units[index];
+                final active = selectedUnit?.lessonKey == unit.lessonKey;
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    setState(() {
+                      _selectedLessonKey = unit.lessonKey;
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: active
+                          ? const Color(0xFF2A1D10)
+                          : const Color(0xFF19110B),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: active
+                            ? const Color(0xFF8A581A)
+                            : Colors.white.withValues(alpha: 0.06),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 46,
+                          child: Text(
+                            (index + 1).toString().padLeft(2, '0'),
+                            style: TextStyle(
+                              color: active
+                                  ? const Color(0xFFFFB239)
+                                  : const Color(0xFF7B5A2C),
+                              fontSize: active ? 15 : 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                unit.lessonTitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: active
+                                      ? const Color(0xFFFFB239)
+                                      : const Color(0xFFB47A23),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                '${_unitStatusLabel(unit.status)} · 练习 ${unit.practiceCount} 次 · ${unit.progressPercent.round()}% · 熟练度 ${unit.proficiency}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.5),
+                                  fontSize: 10.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        _statusTrailing(unit.status, selected: active),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFF18100A),
+              border: Border(top: BorderSide(color: Color(0xFF3A2611))),
+            ),
+            padding: const EdgeInsets.fromLTRB(22, 12, 22, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    selectedUnit == null
+                        ? '已选择:${selectedCourse.courseTitle}'
+                        : '已选择:${selectedCourse.courseTitle} / ${selectedUnit.lessonTitle}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.46),
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 148,
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: () => _confirmSelection(selectedCourse),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFFAA2B),
+                      foregroundColor: Colors.black,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      '继续学习',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

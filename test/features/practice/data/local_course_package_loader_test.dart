@@ -139,6 +139,25 @@ void main() {
     expect(sentence.courseTitle, 'Single Course');
   });
 
+  test('listLocalCourseCatalogs returns course units', () async {
+    await createTaskPackage(
+      taskId: 'task_catalog',
+      updatedAt: '2026-02-16T11:00:00Z',
+      courseId: 'course_catalog',
+      title: 'Catalog Course',
+      mediaType: 'video',
+    );
+
+    final catalogs = await listLocalCourseCatalogs();
+    expect(catalogs, isNotEmpty);
+    final catalog = catalogs.firstWhere((c) => c.courseId == 'course_catalog');
+    expect(catalog.title, 'Catalog Course');
+    expect(catalog.units.length, 1);
+    expect(catalog.units.first.lessonId, '01');
+    expect(catalog.units.first.firstSentenceId, '01-0001');
+    expect(catalog.units.first.sentenceCount, 1);
+  });
+
   test('sentenceExistsInLocalPackage validates sentence id by package',
       () async {
     await createTaskPackage(

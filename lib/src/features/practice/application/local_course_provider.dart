@@ -42,3 +42,9 @@ final localCourseSentencesProvider = FutureProvider<LocalSentenceLoadResult>((
   }
   return loadSentencesFromLocalPackage(packageRoot: packageRoot);
 });
+
+final localCourseCatalogsProvider = FutureProvider<List<LocalCourseCatalog>>((
+  ref,
+) async {
+  return listLocalCourseCatalogs();
+});

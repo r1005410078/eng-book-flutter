@@ -25,11 +25,43 @@ class LocalSentenceLoadResult {
   const LocalSentenceLoadResult({required this.sentences, this.warning});
 }
 
+class LocalCourseUnitSummary {
+  final String lessonId;
+  final String title;
+  final String firstSentenceId;
+  final int sentenceCount;
+
+  const LocalCourseUnitSummary({
+    required this.lessonId,
+    required this.title,
+    required this.firstSentenceId,
+    required this.sentenceCount,
+  });
+}
+
+class LocalCourseCatalog {
+  final String courseId;
+  final String title;
+  final String packageRoot;
+  final List<LocalCourseUnitSummary> units;
+
+  const LocalCourseCatalog({
+    required this.courseId,
+    required this.title,
+    required this.packageRoot,
+    required this.units,
+  });
+}
+
 Future<String?> discoverLatestReadyPackageRoot() async {
   return null;
 }
 
 Future<List<LocalCourseSummary>> listLocalCoursePackages() async {
+  return const [];
+}
+
+Future<List<LocalCourseCatalog>> listLocalCourseCatalogs() async {
   return const [];
 }
 

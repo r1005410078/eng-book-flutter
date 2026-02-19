@@ -29,6 +29,34 @@ class LocalSentenceLoadResult {
   const LocalSentenceLoadResult({required this.sentences, this.warning});
 }
 
+class LocalCourseUnitSummary {
+  final String lessonId;
+  final String title;
+  final String firstSentenceId;
+  final int sentenceCount;
+
+  const LocalCourseUnitSummary({
+    required this.lessonId,
+    required this.title,
+    required this.firstSentenceId,
+    required this.sentenceCount,
+  });
+}
+
+class LocalCourseCatalog {
+  final String courseId;
+  final String title;
+  final String packageRoot;
+  final List<LocalCourseUnitSummary> units;
+
+  const LocalCourseCatalog({
+    required this.courseId,
+    required this.title,
+    required this.packageRoot,
+    required this.units,
+  });
+}
+
 Future<String?> discoverLatestReadyPackageRoot() async {
   final runtimeTasks = await resolveRuntimeTasksDir();
   if (!runtimeTasks.existsSync()) return null;
@@ -158,6 +186,41 @@ Future<List<LocalCourseSummary>> listLocalCoursePackages() async {
 
   summaries.sort((a, b) => b.packageRoot.compareTo(a.packageRoot));
   return summaries;
+}
+
+Future<List<LocalCourseCatalog>> listLocalCourseCatalogs() async {
+  final runtimeTasks = await resolveRuntimeTasksDir();
+  if (!runtimeTasks.existsSync()) return const [];
+
+  final catalogs = <LocalCourseCatalog>[];
+  final taskFiles = runtimeTasks
+      .listSync()
+      .whereType<File>()
+      .where((f) => f.path.endsWith('.json'))
+      .where((f) => f.uri.pathSegments.last.startsWith('task_'))
+      .toList();
+
+  for (final file in taskFiles) {
+    dynamic task;
+    try {
+      task = jsonDecode(await file.readAsString());
+    } catch (_) {
+      continue;
+    }
+    if (task is! Map) continue;
+    if ((task['status'] ?? '').toString() != 'ready') continue;
+    final taskId = (task['task_id'] ?? '').toString();
+    if (taskId.isEmpty) continue;
+
+    final packageDir = Directory('${runtimeTasks.path}/$taskId/package');
+    final catalog = await _readCourseCatalogFromPackageDir(packageDir);
+    if (catalog != null) {
+      catalogs.add(catalog);
+    }
+  }
+
+  catalogs.sort((a, b) => b.packageRoot.compareTo(a.packageRoot));
+  return catalogs;
 }
 
 Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({
@@ -295,6 +358,76 @@ Future<bool> sentenceExistsInLocalPackage({
   final loaded = await loadSentencesFromLocalPackage(packageRoot: packageRoot);
   if (loaded.sentences.isEmpty) return false;
   return loaded.sentences.any((s) => s.id == sentenceId);
+}
+
+Future<LocalCourseCatalog?> _readCourseCatalogFromPackageDir(
+  Directory packageDir,
+) async {
+  if (!packageDir.existsSync()) return null;
+  final manifestFile = File('${packageDir.path}/course_manifest.json');
+  if (!manifestFile.existsSync()) return null;
+
+  dynamic manifest;
+  try {
+    manifest = jsonDecode(await manifestFile.readAsString());
+  } catch (_) {
+    return null;
+  }
+  if (manifest is! Map) return null;
+
+  final courseId = (manifest['course_id'] ?? 'local_course').toString();
+  final title = (manifest['title'] ?? courseId).toString();
+  final lessons = manifest['lessons'];
+  if (lessons is! List || lessons.isEmpty) return null;
+
+  final units = <LocalCourseUnitSummary>[];
+  var unitNumber = 1;
+  for (final lesson in lessons) {
+    if (lesson is! Map) continue;
+    final lessonPath = (lesson['path'] ?? '').toString();
+    if (lessonPath.isEmpty) continue;
+    final lessonFile = File('${packageDir.path}/$lessonPath');
+    if (!lessonFile.existsSync()) continue;
+
+    dynamic lessonJson;
+    try {
+      lessonJson = jsonDecode(await lessonFile.readAsString());
+    } catch (_) {
+      continue;
+    }
+    if (lessonJson is! Map) continue;
+    final sentences = lessonJson['sentences'];
+    if (sentences is! List || sentences.isEmpty) continue;
+    final firstSentence = sentences.first;
+    if (firstSentence is! Map) continue;
+    final firstSentenceId = (firstSentence['sentence_id'] ?? '').toString();
+    if (firstSentenceId.isEmpty) continue;
+
+    final lessonId =
+        (lessonJson['lesson_id'] ?? lesson['lesson_id'] ?? '$unitNumber')
+            .toString();
+    final lessonTitle = (lessonJson['title'] ?? '').toString().trim();
+    final displayTitle = lessonTitle.isNotEmpty
+        ? lessonTitle
+        : '单元 ${unitNumber.toString().padLeft(2, '0')}';
+    units.add(
+      LocalCourseUnitSummary(
+        lessonId: lessonId,
+        title: displayTitle,
+        firstSentenceId: firstSentenceId,
+        sentenceCount: sentences.length,
+      ),
+    );
+    unitNumber++;
+  }
+
+  if (units.isEmpty) return null;
+  return LocalCourseCatalog(
+    courseId: courseId,
+    title: title,
+    packageRoot: packageDir.path,
+    units: units,
+  );
 }
 
 int _toInt(dynamic value) {
