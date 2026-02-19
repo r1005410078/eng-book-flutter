@@ -14,7 +14,6 @@ class PracticePlaybackSettings {
   final bool showEnglish;
   final bool showChinese;
   final bool blurTranslationByDefault;
-  final int loopCount;
   final PlaybackCompletionMode completionMode;
   final bool autoRecord;
   final double subtitleScale;
@@ -24,7 +23,6 @@ class PracticePlaybackSettings {
     required this.showEnglish,
     required this.showChinese,
     required this.blurTranslationByDefault,
-    required this.loopCount,
     required this.completionMode,
     required this.autoRecord,
     required this.subtitleScale,
@@ -35,7 +33,6 @@ class PracticePlaybackSettings {
     showEnglish: true,
     showChinese: true,
     blurTranslationByDefault: false,
-    loopCount: 1,
     completionMode: PlaybackCompletionMode.courseLoop,
     autoRecord: false,
     subtitleScale: 0.5,
@@ -46,7 +43,6 @@ class PracticePlaybackSettings {
     bool? showEnglish,
     bool? showChinese,
     bool? blurTranslationByDefault,
-    int? loopCount,
     PlaybackCompletionMode? completionMode,
     bool? autoRecord,
     double? subtitleScale,
@@ -57,7 +53,6 @@ class PracticePlaybackSettings {
       showChinese: showChinese ?? this.showChinese,
       blurTranslationByDefault:
           blurTranslationByDefault ?? this.blurTranslationByDefault,
-      loopCount: loopCount ?? this.loopCount,
       completionMode: completionMode ?? this.completionMode,
       autoRecord: autoRecord ?? this.autoRecord,
       subtitleScale: subtitleScale ?? this.subtitleScale,
@@ -70,7 +65,6 @@ class PracticePlaybackSettings {
       'showEnglish': showEnglish,
       'showChinese': showChinese,
       'blurTranslationByDefault': blurTranslationByDefault,
-      'loopCount': loopCount,
       'completionMode': completionMode.name,
       'autoRecord': autoRecord,
       'subtitleScale': subtitleScale,
@@ -94,13 +88,6 @@ class PracticePlaybackSettings {
       return fallback;
     }
 
-    int readInt(String key, int fallback) {
-      final value = json[key];
-      if (value is int) return value;
-      if (value is num) return value.toInt();
-      return int.tryParse(value?.toString() ?? '') ?? fallback;
-    }
-
     PlaybackCompletionMode readCompletionMode(
       String key,
       PlaybackCompletionMode fallback,
@@ -115,7 +102,6 @@ class PracticePlaybackSettings {
     final speed = readDouble('playbackSpeed', defaults.playbackSpeed)
         .clamp(0.5, 1.0)
         .toDouble();
-    final loop = readInt('loopCount', defaults.loopCount).clamp(1, 10);
     final scale =
         readDouble('subtitleScale', defaults.subtitleScale).clamp(0.0, 1.0);
 
@@ -127,7 +113,6 @@ class PracticePlaybackSettings {
         'blurTranslationByDefault',
         defaults.blurTranslationByDefault,
       ),
-      loopCount: loop,
       completionMode: readCompletionMode(
         'completionMode',
         defaults.completionMode,

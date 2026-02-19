@@ -39,10 +39,6 @@ class PracticePlaybackSettingsController
     await _set(state.copyWith(blurTranslationByDefault: value));
   }
 
-  Future<void> setLoopCount(int value) async {
-    await _set(state.copyWith(loopCount: value.clamp(1, 10)));
-  }
-
   Future<void> setCompletionMode(PlaybackCompletionMode mode) async {
     await _set(state.copyWith(completionMode: mode));
   }

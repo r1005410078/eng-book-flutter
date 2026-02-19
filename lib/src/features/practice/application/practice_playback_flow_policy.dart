@@ -1,33 +1,5 @@
 import 'package:record/record.dart';
 
-enum SentenceEndAction { loopCurrent, advance }
-
-class SentenceEndDecision {
-  final SentenceEndAction action;
-  final int nextRemainingLoops;
-
-  const SentenceEndDecision({
-    required this.action,
-    required this.nextRemainingLoops,
-  });
-}
-
-SentenceEndDecision decideSentenceEndAction({
-  required int remainingLoops,
-}) {
-  final safeRemaining = remainingLoops < 1 ? 1 : remainingLoops;
-  if (safeRemaining > 1) {
-    return SentenceEndDecision(
-      action: SentenceEndAction.loopCurrent,
-      nextRemainingLoops: safeRemaining - 1,
-    );
-  }
-  return const SentenceEndDecision(
-    action: SentenceEndAction.advance,
-    nextRemainingLoops: 1,
-  );
-}
-
 enum AutoRecordAvailability {
   available,
   permissionDenied,

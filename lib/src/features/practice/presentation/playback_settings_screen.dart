@@ -309,60 +309,6 @@ class PlaybackSettingsScreen extends ConsumerWidget {
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.05),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.repeat_one,
-                        color: Colors.grey,
-                        size: 20,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    const Text(
-                      '单句循环次数',
-                      style: TextStyle(color: Colors.white, fontSize: 16),
-                    ),
-                    const Spacer(),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          _buildCounterButton(Icons.remove, () {
-                            controller.setLoopCount(settings.loopCount - 1);
-                          }),
-                          SizedBox(
-                            width: 32,
-                            child: Text(
-                              '${settings.loopCount}',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ),
-                          _buildCounterButton(Icons.add, () {
-                            controller.setLoopCount(settings.loopCount + 1);
-                          }),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Divider(height: 1, color: Colors.white.withValues(alpha: 0.05)),
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -460,17 +406,6 @@ class PlaybackSettingsScreen extends ConsumerWidget {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildCounterButton(IconData icon, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        color: Colors.transparent,
-        child: Icon(icon, color: Colors.grey, size: 16),
-      ),
     );
   }
 

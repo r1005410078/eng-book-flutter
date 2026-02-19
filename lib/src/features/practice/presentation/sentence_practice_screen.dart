@@ -148,7 +148,6 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   // Video Controls State
   final double _volume = 1.0;
   double _playbackSpeed = 1.0;
-  int _loopCount = 1;
   PlaybackCompletionMode _completionMode = PlaybackCompletionMode.courseLoop;
   bool _autoRecord = false;
   bool _isFullscreen = false;
@@ -169,10 +168,9 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   final Set<int> _previewControllerLoading = {};
   String? _lastRecordedLessonKey;
   ProviderSubscription<PracticePlaybackSettings>? _settingsSubscription;
-  String? _loopSentenceId;
-  int _remainingLoopsForSentence = 1;
   bool _isHandlingSentenceEnd = false;
   bool _isHorizontalDragging = false;
+  bool _isScrubbingProgressBar = false;
   bool _showBottomControls = true;
   Timer? _controlsAutoHideTimer;
   Timer? _controlsPauseRevealTimer;
@@ -243,14 +241,8 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     _showChinese = settings.showChinese;
     _blurTranslationByDefault = settings.blurTranslationByDefault;
     _subtitleScale = settings.subtitleScale;
-    _loopCount = settings.loopCount;
     _completionMode = settings.completionMode;
     _autoRecord = settings.autoRecord;
-    if (_sentences.isNotEmpty &&
-        _currentIndex >= 0 &&
-        _currentIndex < _sentences.length) {
-      _resetSentenceLoopState(_sentences[_currentIndex].id);
-    }
     if (mounted) {
       setState(() {});
     }
@@ -350,7 +342,6 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       );
     }
     _lessonLastSentenceIndex[_lessonKeyAt(targetIndex)] = targetIndex;
-    _resetSentenceLoopState(list[targetIndex].id);
     _cacheCurrentLessonPlayingState();
     unawaited(_recordPracticeForIndex(targetIndex, countLessonEntry: true));
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -456,7 +447,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         await next.dispose();
         return;
       }
-      await next.setLooping(true);
+      await next.setLooping(false);
       await next.setVolume(_volume);
       await next.setPlaybackSpeed(_playbackSpeed);
       next.addListener(_syncSentenceWithVideo);
@@ -504,7 +495,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     if (_videoController.value.isInitialized) return;
     try {
       await _videoController.initialize();
-      await _videoController.setLooping(true);
+      await _videoController.setLooping(false);
       await _videoController.setVolume(_volume);
       await _videoController.setPlaybackSpeed(_playbackSpeed);
       _videoController.addListener(_syncSentenceWithVideo);
@@ -520,74 +511,88 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     }
   }
 
-  void _resetSentenceLoopState(String sentenceId) {
-    if (_loopSentenceId == sentenceId) return;
-    _loopSentenceId = sentenceId;
-    _remainingLoopsForSentence = _loopCount.clamp(1, 10);
-  }
-
   Future<void> _handleSentenceEnd() async {
     if (_isHandlingSentenceEnd) return;
     if (_currentIndex < 0 || _currentIndex >= _sentences.length) return;
     _isHandlingSentenceEnd = true;
     try {
       final shouldContinue = _isPlaying;
-      final current = _sentences[_currentIndex];
-      _resetSentenceLoopState(current.id);
-      final decision = decideSentenceEndAction(
-        remainingLoops: _remainingLoopsForSentence,
-      );
-      _remainingLoopsForSentence = decision.nextRemainingLoops;
-      if (decision.action == SentenceEndAction.loopCurrent) {
-        if (_isAudioMode) {
-          await _audioPlayer.seek(current.startTime);
-          if (_isPlaying && !_audioPlayer.playing) {
-            await _audioPlayer.play();
-          }
-        } else if (_videoController.value.isInitialized) {
-          await _videoController.seekTo(current.startTime);
-          if (_isPlaying && !_videoController.value.isPlaying) {
-            await _videoController.play();
-          }
-        }
-        return;
-      }
-
       final nextIndex = _currentIndex + 1;
       if (nextIndex >= 0 && nextIndex < _sentences.length) {
-        final crossesLesson =
-            _lessonKeyAt(nextIndex) != _lessonKeyAt(_currentIndex);
         final bounds = _lessonBoundsForIndex(_currentIndex);
+        final currentLessonKey = _lessonKeyAt(_currentIndex);
         if (_completionMode == PlaybackCompletionMode.unitLoop &&
             _currentIndex >= bounds.end) {
-          await _seekToSentence(bounds.start);
+          final fastSwitched = await _seekWithinCurrentMedia(
+            bounds.start,
+            preservePlayingState: true,
+          );
+          if (!fastSwitched) {
+            await _seekToSentence(bounds.start, preservePlayingState: true);
+          }
           if (shouldContinue && !_isPlaying) {
             await _playCurrentMedia();
           }
           return;
         }
-        await _seekToSentence(nextIndex);
-        if (shouldContinue &&
-            _completionMode == PlaybackCompletionMode.courseLoop &&
-            crossesLesson &&
-            !_isPlaying) {
+        final crossesLesson = _lessonKeyAt(nextIndex) != currentLessonKey;
+        final advancedWithoutSeek =
+            await _advanceWithinCurrentMediaWithoutSeek(nextIndex);
+        if (!advancedWithoutSeek) {
+          final fastSwitched = await _seekWithinCurrentMedia(
+            nextIndex,
+            preservePlayingState: true,
+          );
+          if (!fastSwitched) {
+            await _seekToSentence(nextIndex, preservePlayingState: true);
+          }
+        }
+        if (shouldContinue && !_isPlaying) {
           await _playCurrentMedia();
+        }
+        if (crossesLesson) {
+          _resetLessonPlaybackProgress(
+            lessonKey: currentLessonKey,
+            lessonStartIndex: bounds.start,
+          );
         }
         return;
       }
 
       if (_completionMode == PlaybackCompletionMode.courseLoop) {
-        await _seekToSentence(0);
+        final bounds = _lessonBoundsForIndex(_currentIndex);
+        final currentLessonKey = _lessonKeyAt(_currentIndex);
+        final fastSwitched = await _seekWithinCurrentMedia(
+          0,
+          preservePlayingState: true,
+        );
+        if (!fastSwitched) {
+          await _seekToSentence(0, preservePlayingState: true);
+        }
         if (shouldContinue && !_isPlaying) {
           await _playCurrentMedia();
         }
+        _resetLessonPlaybackProgress(
+          lessonKey: currentLessonKey,
+          lessonStartIndex: bounds.start,
+        );
         return;
       }
       if (_completionMode == PlaybackCompletionMode.pauseAfterFinish) {
+        final bounds = _lessonBoundsForIndex(_currentIndex);
+        _resetLessonPlaybackProgress(
+          lessonKey: _lessonKeyAt(_currentIndex),
+          lessonStartIndex: bounds.start,
+        );
         await _pauseCurrentMedia();
         return;
       }
       if (_completionMode == PlaybackCompletionMode.allCoursesLoop) {
+        final bounds = _lessonBoundsForIndex(_currentIndex);
+        _resetLessonPlaybackProgress(
+          lessonKey: _lessonKeyAt(_currentIndex),
+          lessonStartIndex: bounds.start,
+        );
         final moved = await _moveToNextCourseForLoop();
         if (!moved) {
           await _pauseCurrentMedia();
@@ -596,6 +601,19 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     } finally {
       _isHandlingSentenceEnd = false;
     }
+  }
+
+  bool _shouldAdvanceAtSentenceEnd(
+    Duration currentPos,
+    SentenceDetail sentence,
+  ) {
+    final sentenceDuration = sentence.endTime - sentence.startTime;
+    final durationMs = sentenceDuration.inMilliseconds;
+    if (durationMs <= 0) return currentPos >= sentence.endTime;
+    final thresholdMs = (durationMs ~/ 6).clamp(70, 120);
+    final triggerAt =
+        sentence.endTime - Duration(milliseconds: thresholdMs.toInt());
+    return currentPos >= triggerAt;
   }
 
   Future<bool> _moveToNextCourseForLoop() async {
@@ -662,7 +680,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       final current = _sentences[_currentIndex];
       if (_isPlaying &&
           !_isSeeking &&
-          currentPos >= current.endTime &&
+          _shouldAdvanceAtSentenceEnd(currentPos, current) &&
           !_isShadowingBusy) {
         unawaited(_runShadowingStep());
       }
@@ -670,7 +688,9 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     }
     if (_currentIndex >= 0 && _currentIndex < _sentences.length) {
       final current = _sentences[_currentIndex];
-      if (_isPlaying && !_isSeeking && currentPos >= current.endTime) {
+      if (_isPlaying &&
+          !_isSeeking &&
+          _shouldAdvanceAtSentenceEnd(currentPos, current)) {
         unawaited(_handleSentenceEnd());
         return;
       }
@@ -687,7 +707,6 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
             _currentIndex = i;
           });
           _lessonLastSentenceIndex[_lessonKeyAt(i)] = i;
-          _resetSentenceLoopState(_sentences[i].id);
           unawaited(_persistLearningResume());
           unawaited(_recordPracticeForIndex(i));
         }
@@ -705,7 +724,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       final current = _sentences[_currentIndex];
       if (_isPlaying &&
           !_isSeeking &&
-          currentPos >= current.endTime &&
+          _shouldAdvanceAtSentenceEnd(currentPos, current) &&
           !_isShadowingBusy) {
         unawaited(_runShadowingStep());
       }
@@ -713,7 +732,9 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     }
     if (_currentIndex >= 0 && _currentIndex < _sentences.length) {
       final current = _sentences[_currentIndex];
-      if (_isPlaying && !_isSeeking && currentPos >= current.endTime) {
+      if (_isPlaying &&
+          !_isSeeking &&
+          _shouldAdvanceAtSentenceEnd(currentPos, current)) {
         unawaited(_handleSentenceEnd());
         return;
       }
@@ -727,7 +748,6 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
             _currentIndex = i;
           });
           _lessonLastSentenceIndex[_lessonKeyAt(i)] = i;
-          _resetSentenceLoopState(_sentences[i].id);
           unawaited(_persistLearningResume());
           unawaited(_recordPracticeForIndex(i));
         }
@@ -1305,12 +1325,52 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     }
   }
 
+  Duration? _durationForProgress(double progress) {
+    final clamped = progress.clamp(0.0, 1.0);
+    final total = _isAudioMode
+        ? _audioDuration
+        : (_videoController.value.isInitialized
+            ? _videoController.value.duration
+            : Duration.zero);
+    if (total <= Duration.zero) return null;
+    return Duration(
+      milliseconds: (total.inMilliseconds * clamped).round(),
+    );
+  }
+
+  void _syncSentenceIndexAfterSeek(Duration target) {
+    if (_sentences.isEmpty) return;
+    if (_currentIndex < 0 || _currentIndex >= _sentences.length) return;
+    final bounds = _lessonBoundsForIndex(_currentIndex);
+    int matched = bounds.end;
+    for (int i = bounds.start; i <= bounds.end; i++) {
+      final s = _sentences[i];
+      if (target >= s.startTime && target < s.endTime) {
+        matched = i;
+        break;
+      }
+    }
+
+    if (matched != _currentIndex && mounted) {
+      setState(() {
+        _currentIndex = matched;
+      });
+      _lessonLastSentenceIndex[_lessonKeyAt(matched)] = matched;
+      _cacheCurrentLessonPlayingState();
+      unawaited(_persistLearningResume());
+      unawaited(_recordPracticeForIndex(matched));
+      return;
+    }
+    _lessonLastSentenceIndex[_lessonKeyAt(matched)] = matched;
+  }
+
   void _onSeekStart(double progress) {
     if (_isShadowingMode) return;
     if (_isShadowingBusy) {
       unawaited(_cancelShadowingStep(keepMode: true));
     }
     setState(() {
+      _isScrubbingProgressBar = true;
       _isSeeking = true;
       _seekProgress = progress.clamp(0.0, 1.0);
     });
@@ -1330,20 +1390,58 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     if (_isShadowingMode) return;
     if (!_isSeeking) return;
     final target = _seekProgress;
+    await _seekByProgress(target);
+    final targetDuration = _durationForProgress(target);
+    if (targetDuration != null) {
+      _syncSentenceIndexAfterSeek(targetDuration);
+    }
+    if (!mounted) return;
     setState(() {
+      _isScrubbingProgressBar = false;
       _isSeeking = false;
+      _seekProgress = target;
     });
     _scheduleControlsAutoHide();
-    await _seekByProgress(target);
   }
 
   Future<void> _onSeekTap(double progress) async {
     if (_isShadowingMode) return;
+    final target = progress.clamp(0.0, 1.0);
     setState(() {
-      _isSeeking = false;
+      _isSeeking = true;
+      _seekProgress = target;
     });
     _onUserInteraction();
-    await _seekByProgress(progress);
+    await _seekByProgress(target);
+    final targetDuration = _durationForProgress(target);
+    if (targetDuration != null) {
+      _syncSentenceIndexAfterSeek(targetDuration);
+    }
+    if (!mounted) return;
+    setState(() {
+      _isScrubbingProgressBar = false;
+      _isSeeking = false;
+      _seekProgress = target;
+    });
+    _scheduleControlsAutoHide();
+  }
+
+  void _onSeekInteractionStart() {
+    if (_isScrubbingProgressBar) return;
+    if (!mounted) return;
+    setState(() {
+      _isScrubbingProgressBar = true;
+    });
+    _onUserInteraction();
+  }
+
+  void _onSeekInteractionEnd() {
+    if (!_isScrubbingProgressBar) return;
+    if (!mounted) return;
+    setState(() {
+      _isScrubbingProgressBar = false;
+    });
+    _scheduleControlsAutoHide();
   }
 
   // Waveform sync removed
@@ -1420,13 +1518,13 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   }
 
   void _onGlobalHorizontalDragStart(DragStartDetails details) {
-    if (_isShadowingMode) return;
+    if (_isShadowingMode || _isScrubbingProgressBar) return;
     _isHorizontalDragging = true;
     _onUserInteraction();
   }
 
   void _onGlobalHorizontalDragUpdate(DragUpdateDetails details) {
-    if (_isShadowingMode) return;
+    if (_isShadowingMode || _isScrubbingProgressBar) return;
     final width = MediaQuery.of(context).size.width;
     final delta = details.delta.dx;
     final hasNext = _currentIndex + 1 < _sentences.length;
@@ -1444,7 +1542,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   }
 
   void _onGlobalHorizontalDragEnd(DragEndDetails details) {
-    if (_isShadowingMode) return;
+    if (_isShadowingMode || _isScrubbingProgressBar) return;
     _isHorizontalDragging = false;
     final width = MediaQuery.of(context).size.width;
     final velocity = details.velocity.pixelsPerSecond.dx;
@@ -1466,6 +1564,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   }
 
   void _onGlobalHorizontalDragCancel() {
+    if (_isScrubbingProgressBar) return;
     _isHorizontalDragging = false;
     _settleHorizontalPreview();
     _scheduleControlsAutoHide();
@@ -1509,7 +1608,8 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   }
 
   String _lessonKeyFromSentence(SentenceDetail sentence) {
-    final packageRoot = (sentence.packageRoot ?? '').trim();
+    final packageRoot =
+        (sentence.packageRoot ?? _currentPackageRoot ?? '').trim();
     final courseTitle = (sentence.courseTitle ?? '').trim();
     final scope = packageRoot.isNotEmpty
         ? 'pkg:$packageRoot'
@@ -1726,7 +1826,10 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     );
   }
 
-  Future<void> _seekToSentence(int index) async {
+  Future<void> _seekToSentence(
+    int index, {
+    bool preservePlayingState = false,
+  }) async {
     if (index < 0 || index >= _sentences.length) return;
     final previousLessonKey =
         (_currentIndex >= 0 && _currentIndex < _sentences.length)
@@ -1739,22 +1842,26 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       _horizontalPreviewIndex = null;
       _isSentenceSwitching = true;
       _currentIndex = index;
-      _isPlaying = _playingStateForIndex(index);
+      if (!preservePlayingState) {
+        _isPlaying = _playingStateForIndex(index);
+      }
     });
 
     try {
       await _switchMedia(
         s.mediaPath,
         mediaType: s.mediaType,
-        seekTo: s.startTime,
+        // Seek once after media selection to avoid duplicate seek jitter.
+        seekTo: null,
         requestToken: requestToken,
       );
       if (!mounted || requestToken != _seekRequestToken) return;
+      final seekTarget = s.startTime;
 
       if (_isAudioMode) {
-        await _audioPlayer.seek(s.startTime);
+        await _audioPlayer.seek(seekTarget);
       } else if (_videoController.value.isInitialized) {
-        await _videoController.seekTo(s.startTime);
+        await _videoController.seekTo(seekTarget);
       }
 
       if (!mounted || requestToken != _seekRequestToken) return;
@@ -1773,20 +1880,19 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
               : Duration.zero);
       _cacheMediaStateForLessonIndex(
         index,
-        position: s.startTime,
+        position: seekTarget,
         duration: activeDuration,
       );
       _lessonLastSentenceIndex[_lessonKeyAt(index)] = index;
-      _resetSentenceLoopState(_sentences[index].id);
       _cacheCurrentLessonPlayingState();
       _syncLessonPageWithCurrentSentence();
       final targetLessonKey = _lessonKeyAt(index);
       final lessonChanged = previousLessonKey != targetLessonKey;
-      await _recordPracticeForIndex(
+      unawaited(_recordPracticeForIndex(
         index,
         countLessonEntry: lessonChanged,
-      );
-      await _persistLearningResume();
+      ));
+      unawaited(_persistLearningResume());
       unawaited(_warmAdjacentLessonPreviews());
       // _audioPlayer.seek(s.startTime); // Not using separate audio
       // Waveform removed
@@ -1819,6 +1925,152 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         lessonId: sentence.lessonId,
       ),
     );
+  }
+
+  void _resetLessonPlaybackProgress({
+    required String lessonKey,
+    required int lessonStartIndex,
+  }) {
+    if (_sentences.isEmpty) return;
+    if (lessonStartIndex < 0 || lessonStartIndex >= _sentences.length) return;
+    if (_lessonKeyAt(lessonStartIndex) != lessonKey) return;
+
+    _lessonLastSentenceIndex[lessonKey] = lessonStartIndex;
+    _lessonLastMediaPosition[lessonKey] = Duration.zero;
+    _lessonPlayingState[lessonKey] = false;
+  }
+
+  bool _isAudioSentence(SentenceDetail sentence) {
+    final path = (sentence.mediaPath ?? '').trim().toLowerCase();
+    final mediaType = (sentence.mediaType ?? '').toLowerCase();
+    return mediaType == 'audio' ||
+        path.endsWith('.mp3') ||
+        path.endsWith('.aac') ||
+        path.endsWith('.wav') ||
+        path.endsWith('.m4a');
+  }
+
+  Future<bool> _advanceWithinCurrentMediaWithoutSeek(int index) async {
+    if (index < 0 || index >= _sentences.length) return false;
+    if (_currentIndex < 0 || _currentIndex >= _sentences.length) return false;
+    final current = _sentences[_currentIndex];
+    final next = _sentences[index];
+    final currentPath = (current.mediaPath ?? '').trim();
+    final nextPath = (next.mediaPath ?? '').trim();
+    if (currentPath.isEmpty || nextPath.isEmpty) return false;
+    if (currentPath != nextPath) return false;
+    if (_isAudioSentence(current) != _isAudioSentence(next)) return false;
+
+    final previousLessonKey = _lessonKeyAt(_currentIndex);
+    if (mounted) {
+      setState(() {
+        _horizontalDragOffset = 0;
+        _horizontalPreviewIndex = null;
+        _currentIndex = index;
+      });
+    } else {
+      _horizontalDragOffset = 0;
+      _horizontalPreviewIndex = null;
+      _currentIndex = index;
+    }
+
+    _lessonLastSentenceIndex[_lessonKeyAt(index)] = index;
+    _cacheCurrentLessonPlayingState();
+    _syncLessonPageWithCurrentSentence();
+    final targetLessonKey = _lessonKeyAt(index);
+    final lessonChanged = previousLessonKey != targetLessonKey;
+    unawaited(
+      _recordPracticeForIndex(
+        index,
+        countLessonEntry: lessonChanged,
+      ),
+    );
+    unawaited(_persistLearningResume());
+    unawaited(_warmAdjacentLessonPreviews());
+    return true;
+  }
+
+  Future<bool> _seekWithinCurrentMedia(
+    int index, {
+    required bool preservePlayingState,
+  }) async {
+    if (index < 0 || index >= _sentences.length) return false;
+    final sentence = _sentences[index];
+    final targetPath = (sentence.mediaPath ?? '').trim();
+    final currentPath = (_currentMediaPath ?? '').trim();
+    if (targetPath.isEmpty || targetPath != currentPath) return false;
+    if (_isAudioSentence(sentence) != _isAudioMode) return false;
+
+    final requestToken = ++_seekRequestToken;
+    final previousLessonKey =
+        (_currentIndex >= 0 && _currentIndex < _sentences.length)
+            ? _lessonKeyAt(_currentIndex)
+            : null;
+
+    if (mounted) {
+      setState(() {
+        _horizontalDragOffset = 0;
+        _horizontalPreviewIndex = null;
+        _currentIndex = index;
+        if (!preservePlayingState) {
+          _isPlaying = _playingStateForIndex(index);
+        }
+      });
+    } else {
+      _horizontalDragOffset = 0;
+      _horizontalPreviewIndex = null;
+      _currentIndex = index;
+      if (!preservePlayingState) {
+        _isPlaying = _playingStateForIndex(index);
+      }
+    }
+
+    _isSentenceSwitching = true;
+    try {
+      if (_isAudioMode) {
+        await _audioPlayer.seek(sentence.startTime);
+      } else if (_videoController.value.isInitialized) {
+        await _videoController.seekTo(sentence.startTime);
+      } else {
+        return false;
+      }
+
+      if (!mounted || requestToken != _seekRequestToken) return true;
+      final actualPlaying = _isAudioMode
+          ? _audioPlayer.playing
+          : (_videoController.value.isInitialized
+              ? _videoController.value.isPlaying
+              : false);
+      setState(() {
+        _isPlaying = actualPlaying;
+      });
+      final activeDuration = _isAudioMode
+          ? _audioDuration
+          : (_videoController.value.isInitialized
+              ? _videoController.value.duration
+              : Duration.zero);
+      _cacheMediaStateForLessonIndex(
+        index,
+        position: sentence.startTime,
+        duration: activeDuration,
+      );
+      _lessonLastSentenceIndex[_lessonKeyAt(index)] = index;
+      _cacheCurrentLessonPlayingState();
+      _syncLessonPageWithCurrentSentence();
+      final targetLessonKey = _lessonKeyAt(index);
+      final lessonChanged = previousLessonKey != targetLessonKey;
+      unawaited(
+        _recordPracticeForIndex(
+          index,
+          countLessonEntry: lessonChanged,
+        ),
+      );
+      unawaited(_persistLearningResume());
+      unawaited(_warmAdjacentLessonPreviews());
+      return true;
+    } finally {
+      _isSentenceSwitching = false;
+    }
   }
 
   Future<void> _recordPracticeForIndex(
@@ -2255,6 +2507,9 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
                         onSeekUpdate: _onSeekUpdate,
                         onSeekEnd: _onSeekEnd,
                         onSeekTap: _onSeekTap,
+                        onSeekInteractionStart: _onSeekInteractionStart,
+                        onSeekInteractionEnd: _onSeekInteractionEnd,
+                        isSeekActive: _isSeeking || _isScrubbingProgressBar,
                       ),
                     ),
                   ),
