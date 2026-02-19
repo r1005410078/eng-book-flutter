@@ -11,8 +11,8 @@ class ShortVideoBottomBar extends StatelessWidget {
   final VoidCallback onTogglePlay;
   final VoidCallback onToggleShadowingMode;
   final VoidCallback onCycleSubtitleMode;
-  final VoidCallback onOpenSettings;
   final VoidCallback onToggleFullscreen;
+  final VoidCallback onLongPressBar;
   final IconData subtitleIcon;
   final bool isFullscreen;
   final ValueChanged<double> onSeekStart;
@@ -30,8 +30,8 @@ class ShortVideoBottomBar extends StatelessWidget {
     required this.onTogglePlay,
     required this.onToggleShadowingMode,
     required this.onCycleSubtitleMode,
-    required this.onOpenSettings,
     required this.onToggleFullscreen,
+    required this.onLongPressBar,
     required this.subtitleIcon,
     required this.isFullscreen,
     required this.onSeekStart,
@@ -56,14 +56,17 @@ class ShortVideoBottomBar extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(14),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-          child: Container(
-            color: Colors.black.withValues(alpha: 0.16),
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onLongPress: onLongPressBar,
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+            child: Container(
+              color: Colors.black.withValues(alpha: 0.16),
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   ClipRRect(
                     borderRadius: BorderRadius.circular(4),
                     child: LayoutBuilder(
@@ -76,8 +79,8 @@ class ShortVideoBottomBar extends StatelessWidget {
 
                         return GestureDetector(
                           behavior: HitTestBehavior.opaque,
-                          onTapDown: (details) =>
-                              onSeekTap(positionToProgress(details.localPosition.dx)),
+                          onTapDown: (details) => onSeekTap(
+                              positionToProgress(details.localPosition.dx)),
                           onHorizontalDragStart: (details) => onSeekStart(
                             positionToProgress(details.localPosition.dx),
                           ),
@@ -88,8 +91,10 @@ class ShortVideoBottomBar extends StatelessWidget {
                           child: LinearProgressIndicator(
                             value: progress,
                             minHeight: 5,
-                            backgroundColor: Colors.white.withValues(alpha: 0.14),
-                            valueColor: AlwaysStoppedAnimation<Color>(accentColor),
+                            backgroundColor:
+                                Colors.white.withValues(alpha: 0.14),
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(accentColor),
                           ),
                         );
                       },
@@ -100,7 +105,8 @@ class ShortVideoBottomBar extends StatelessWidget {
                     children: [
                       _compactIconButton(
                         onPressed: onTogglePlay,
-                        icon: isPlaying ? Icons.pause : Icons.play_arrow_rounded,
+                        icon:
+                            isPlaying ? Icons.pause : Icons.play_arrow_rounded,
                       ),
                       const SizedBox(width: 6),
                       _compactIconButton(
@@ -123,10 +129,6 @@ class ShortVideoBottomBar extends StatelessWidget {
                         icon: subtitleIcon,
                       ),
                       _compactIconButton(
-                        onPressed: onOpenSettings,
-                        icon: Icons.settings_outlined,
-                      ),
-                      _compactIconButton(
                         onPressed: onToggleFullscreen,
                         icon: isFullscreen
                             ? Icons.stay_current_portrait_rounded
@@ -134,7 +136,8 @@ class ShortVideoBottomBar extends StatelessWidget {
                       ),
                     ],
                   ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

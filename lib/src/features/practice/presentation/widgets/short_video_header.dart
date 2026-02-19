@@ -3,14 +3,12 @@ import 'package:flutter/material.dart';
 class ShortVideoHeader extends StatelessWidget {
   final int currentIndex;
   final int total;
-  final VoidCallback onOpenGrid;
   final VoidCallback onOpenDownloadCenter;
 
   const ShortVideoHeader({
     super.key,
     required this.currentIndex,
     required this.total,
-    required this.onOpenGrid,
     required this.onOpenDownloadCenter,
   });
 
@@ -88,23 +86,6 @@ class ShortVideoHeader extends StatelessWidget {
                     size: 20,
                   ),
                   onPressed: onOpenDownloadCenter,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: IconButton(
-                  icon: const Icon(
-                    Icons.grid_view_rounded,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                  onPressed: onOpenGrid,
                 ),
               ),
             ],

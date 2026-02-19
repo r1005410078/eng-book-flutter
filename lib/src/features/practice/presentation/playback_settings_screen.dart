@@ -3,7 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 class PlaybackSettingsScreen extends ConsumerStatefulWidget {
-  const PlaybackSettingsScreen({super.key});
+  final bool asBottomSheet;
+
+  const PlaybackSettingsScreen({
+    super.key,
+    this.asBottomSheet = false,
+  });
 
   @override
   ConsumerState<PlaybackSettingsScreen> createState() =>
@@ -27,54 +32,68 @@ class _PlaybackSettingsScreenState
     const bgColor = Color(0xFF1a120b); // Dark brown/black as per latest design
     const accentColor = Color(0xFFFF9F29); // Orange
 
+    final content = ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        _buildSpeedSection(accentColor),
+        const SizedBox(height: 32),
+        _buildSubtitleSection(accentColor),
+        const SizedBox(height: 32),
+        _buildBehaviorSection(accentColor),
+        const SizedBox(height: 32),
+        _buildInterfaceSection(accentColor),
+        const SizedBox(height: 32),
+        Center(
+          child: Text(
+            'PLAYER VERSION 2.4.0 (100LS BUILD)',
+            style:
+                TextStyle(color: Colors.white.withOpacity(0.1), fontSize: 10),
+          ),
+        ),
+        const SizedBox(height: 20),
+      ],
+    );
+
+    if (widget.asBottomSheet) {
+      return ColoredBox(color: bgColor, child: content);
+    }
+
     return Scaffold(
       backgroundColor: bgColor,
-      appBar: AppBar(
-        backgroundColor: bgColor,
-        elevation: 0,
-        centerTitle: true,
-        title: const Text('播放设置',
-            style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold)),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new,
-              color: Colors.white, size: 20),
-          onPressed: () => context.pop(),
+      appBar: _buildPageAppBar(accentColor),
+      body: content,
+    );
+  }
+
+  PreferredSizeWidget _buildPageAppBar(Color accentColor) {
+    return AppBar(
+      backgroundColor: const Color(0xFF1a120b),
+      elevation: 0,
+      centerTitle: true,
+      title: const Text(
+        '播放设置',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              // TODO: Reset logic
-            },
-            child: const Text('重置',
-                style:
-                    TextStyle(color: accentColor, fontWeight: FontWeight.bold)),
-          ),
-        ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          _buildSpeedSection(accentColor),
-          const SizedBox(height: 32),
-          _buildSubtitleSection(accentColor),
-          const SizedBox(height: 32),
-          _buildBehaviorSection(accentColor),
-          const SizedBox(height: 32),
-          _buildInterfaceSection(accentColor),
-          const SizedBox(height: 32),
-          Center(
-            child: Text(
-              'PLAYER VERSION 2.4.0 (100LS BUILD)',
-              style:
-                  TextStyle(color: Colors.white.withOpacity(0.1), fontSize: 10),
-            ),
-          ),
-          const SizedBox(height: 20),
-        ],
+      leading: IconButton(
+        icon:
+            const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
+        onPressed: () => context.pop(),
       ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            // TODO: Reset logic
+          },
+          child: Text(
+            '重置',
+            style: TextStyle(color: accentColor, fontWeight: FontWeight.bold),
+          ),
+        ),
+      ],
     );
   }
 

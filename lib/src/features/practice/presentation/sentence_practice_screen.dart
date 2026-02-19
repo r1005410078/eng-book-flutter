@@ -14,6 +14,7 @@ import '../data/local_course_package_loader.dart';
 import '../data/learning_resume_store.dart';
 import '../domain/sentence_detail.dart';
 import '../../../routing/routes.dart';
+import 'playback_settings_screen.dart';
 import 'widgets/short_video_bottom_bar.dart';
 import 'widgets/short_video_caption.dart';
 import 'widgets/short_video_header.dart';
@@ -1517,7 +1518,6 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
               child: ShortVideoHeader(
                 currentIndex: lessonProgress.indexInLesson - 1,
                 total: lessonProgress.totalInLesson,
-                onOpenGrid: _openReadingMode,
                 onOpenDownloadCenter: _openDownloadCenter,
               ),
             ),
@@ -1791,9 +1791,8 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
                         onTogglePlay: _togglePlay,
                         onToggleShadowingMode: _toggleShadowingMode,
                         onCycleSubtitleMode: _cycleSubtitleMode,
-                        onOpenSettings: () =>
-                            context.push(Routes.playbackSettings),
                         onToggleFullscreen: _toggleFullscreen,
+                        onLongPressBar: _openPlaybackSettings,
                         subtitleIcon: _subtitleIcon(),
                         isFullscreen: _isFullscreen,
                         onSeekStart: _onSeekStart,
@@ -1828,18 +1827,27 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     );
   }
 
-  void _openReadingMode() {
-    final currentId = _sentences[_currentIndex].id;
-    final basePath = '/practice/reading/$currentId';
-    final package = _currentPackageRoot;
-    final route = package == null || package.isEmpty
-        ? basePath
-        : '$basePath?package=${Uri.encodeComponent(package)}&course=${Uri.encodeComponent(_currentCourseTitle ?? '')}';
-    context.push(route);
-  }
-
   void _openDownloadCenter() {
     context.push(Routes.downloadCenter);
+  }
+
+  Future<void> _openPlaybackSettings() async {
+    if (!mounted) return;
+    final height = MediaQuery.of(context).size.height;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      enableDrag: true,
+      isDismissible: true,
+      showDragHandle: true,
+      backgroundColor: const Color(0xFF1a120b),
+      constraints: BoxConstraints(maxHeight: height * 0.9),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => const PlaybackSettingsScreen(asBottomSheet: true),
+    );
   }
 
   String _formatDuration(Duration duration) {
