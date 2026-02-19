@@ -148,6 +148,8 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   bool _isHorizontalDragging = false;
   bool _isScrubbingProgressBar = false;
   bool _showBottomControls = true;
+  int? _manualSeekExpectedIndex;
+  DateTime? _manualSeekProtectUntil;
   Timer? _controlsAutoHideTimer;
   Timer? _controlsPauseRevealTimer;
   static const Duration _controlsAutoHideDelay = Duration(milliseconds: 1300);
@@ -696,6 +698,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       end: bounds.end,
     );
     if (matchedIndex != null && _currentIndex != matchedIndex) {
+      if (_shouldHoldManualSeekIndex(matchedIndex)) return;
       _applyState(() {
         _currentIndex = matchedIndex;
       });
@@ -1142,6 +1145,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     await _seekByProgress(target);
     final targetDuration = _durationForProgress(target);
     if (targetDuration != null) {
+      _armManualSeekProtection(targetDuration);
       _syncSentenceIndexAfterSeek(targetDuration);
     }
     if (!mounted) return;
@@ -1289,6 +1293,55 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     _isHorizontalDragging = false;
     _settleHorizontalPreview();
     _scheduleControlsAutoHide();
+  }
+
+  void _armManualSeekProtection(Duration target) {
+    final expected = _matchSentenceInCurrentLesson(target);
+    if (expected == null) {
+      _manualSeekExpectedIndex = null;
+      _manualSeekProtectUntil = null;
+      return;
+    }
+    _manualSeekExpectedIndex = expected;
+    _manualSeekProtectUntil = DateTime.now().add(
+      const Duration(seconds: 2),
+    );
+  }
+
+  int? _matchSentenceInCurrentLesson(Duration target) {
+    if (_currentIndex < 0 || _currentIndex >= _sentences.length) return null;
+    final bounds = _lessonBoundsForIndex(_currentIndex);
+    for (int i = bounds.start; i <= bounds.end; i++) {
+      final s = _sentences[i];
+      if (target >= s.startTime && target < s.endTime) {
+        return i;
+      }
+    }
+    return bounds.end;
+  }
+
+  bool _shouldHoldManualSeekIndex(int matchedIndex) {
+    final expected = _manualSeekExpectedIndex;
+    final until = _manualSeekProtectUntil;
+    if (expected == null || until == null) return false;
+    if (DateTime.now().isAfter(until)) {
+      _manualSeekExpectedIndex = null;
+      _manualSeekProtectUntil = null;
+      return false;
+    }
+    if (expected < 0 || expected >= _sentences.length) {
+      _manualSeekExpectedIndex = null;
+      _manualSeekProtectUntil = null;
+      return false;
+    }
+    if (matchedIndex >= expected) {
+      _manualSeekExpectedIndex = null;
+      _manualSeekProtectUntil = null;
+      return false;
+    }
+    // During manual seek settling, prevent automatic sync from snapping back
+    // to the previous sentence due to keyframe-aligned positions.
+    return _lessonKeyAt(matchedIndex) == _lessonKeyAt(expected);
   }
 
   List<int> _computeLessonStartIndicesFromKeys(List<String> lessonKeys) {
