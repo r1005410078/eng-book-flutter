@@ -11,6 +11,32 @@ bash tools/course_pipeline/bin/install_global_command.sh
 course-pipeline --help
 ```
 
+## Package Publish Helpers
+Compute package checksum/size:
+```bash
+course-pipeline package inspect ./course.zip
+```
+
+Build `catalog.json` with computed `sha256` and `size_bytes`:
+```bash
+course-pipeline package build-catalog ./course.zip \
+  --download-url http://home.rongts.tech:9000/engbook-courses/course.zip \
+  --course-id course_daily_english \
+  --title "Daily English" \
+  --out ./catalog.json
+```
+
+Upload package to MinIO (requires `mc`):
+```bash
+course-pipeline package upload-minio ./course.zip \
+  --endpoint http://home.rongts.tech:9000 \
+  --bucket engbook-courses \
+  --object-key course.zip \
+  --make-bucket \
+  --access-key "$COURSE_PIPELINE_MINIO_ACCESS_KEY" \
+  --secret-key "$COURSE_PIPELINE_MINIO_SECRET_KEY"
+```
+
 ## Human-in-the-loop Steps
 Use explicit step commands for AI stages:
 - `course-pipeline task run-step <task_id> translate`

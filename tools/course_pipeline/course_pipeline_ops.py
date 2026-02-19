@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -10,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from shutil import which
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from urllib.request import Request, urlopen
 
 STATUSES = {"uploaded", "processing", "paused", "ready", "failed", "stopped"}
@@ -30,6 +31,76 @@ def now_iso() -> str:
 def out(payload: dict, code: int = 0) -> int:
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return code
+
+
+def read_secret_arg_or_env(value: str | None, env_key: str) -> str | None:
+    if value and value.strip():
+        return value.strip()
+    env_value = os.getenv(env_key, "").strip()
+    return env_value or None
+
+
+def sha256_and_size(path: Path) -> tuple[str, int]:
+    hasher = hashlib.sha256()
+    total = 0
+    with path.open("rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            hasher.update(chunk)
+            total += len(chunk)
+    return hasher.hexdigest(), total
+
+
+def normalize_endpoint_host(endpoint: str) -> str:
+    endpoint = endpoint.strip()
+    parsed = urlparse(endpoint if "://" in endpoint else f"http://{endpoint}")
+    if not parsed.hostname:
+        raise ValueError("invalid endpoint")
+    if parsed.port:
+        return f"{parsed.hostname}:{parsed.port}"
+    return parsed.hostname
+
+
+def run_mc_copy(
+    endpoint: str,
+    access_key: str,
+    secret_key: str,
+    bucket: str,
+    object_key: str,
+    source_file: Path,
+    make_bucket: bool,
+) -> tuple[str, bool]:
+    mc_bin = which("mc")
+    if mc_bin is None:
+        raise RuntimeError("MINIO_MC_NOT_FOUND")
+
+    host = normalize_endpoint_host(endpoint)
+    alias = "coursepipeline"
+    host_url = (
+        f"http://{quote(access_key, safe='')}:{quote(secret_key, safe='')}@{host}"
+    )
+    env = dict(os.environ)
+    env[f"MC_HOST_{alias}"] = host_url
+
+    if make_bucket:
+        subprocess.run(
+            [mc_bin, "mb", "--ignore-existing", f"{alias}/{bucket}"],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+    subprocess.run(
+        [mc_bin, "cp", str(source_file), f"{alias}/{bucket}/{object_key}"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    object_url = f"{endpoint.rstrip('/')}/{bucket}/{object_key.lstrip('/')}"
+    return object_url, make_bucket
 
 
 def project_runtime_dir(project_root: Path) -> Path:
@@ -1270,6 +1341,99 @@ def cmd_task_watch(args: argparse.Namespace) -> int:
         time.sleep(max(args.interval, 1))
 
 
+def cmd_package_inspect(args: argparse.Namespace) -> int:
+    file_path = Path(args.file_path).expanduser().resolve()
+    if not file_path.exists() or not file_path.is_file():
+        return out({"ok": False, "error": {"code": "FILE_NOT_FOUND", "message": str(file_path)}}, 2)
+    digest, size_bytes = sha256_and_size(file_path)
+    return out(
+        {
+            "ok": True,
+            "file": str(file_path),
+            "sha256": digest,
+            "size_bytes": size_bytes,
+        }
+    )
+
+
+def cmd_package_build_catalog(args: argparse.Namespace) -> int:
+    package_file = Path(args.file_path).expanduser().resolve()
+    if not package_file.exists() or not package_file.is_file():
+        return out({"ok": False, "error": {"code": "FILE_NOT_FOUND", "message": str(package_file)}}, 2)
+
+    digest, size_bytes = sha256_and_size(package_file)
+    output_file = Path(args.out).expanduser().resolve()
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    item = {
+        "course_id": args.course_id,
+        "title": args.title or args.course_id,
+        "category": args.category,
+        "level": args.level,
+        "cover_url": args.cover_url,
+        "package_url": args.download_url,
+        "sha256": digest,
+        "size_bytes": size_bytes,
+    }
+    payload = {"version": args.version, "courses": [item]}
+    output_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return out(
+        {
+            "ok": True,
+            "catalog": str(output_file),
+            "course": item,
+        }
+    )
+
+
+def cmd_package_upload_minio(args: argparse.Namespace) -> int:
+    file_path = Path(args.file_path).expanduser().resolve()
+    if not file_path.exists() or not file_path.is_file():
+        return out({"ok": False, "error": {"code": "FILE_NOT_FOUND", "message": str(file_path)}}, 2)
+
+    access_key = read_secret_arg_or_env(args.access_key, "COURSE_PIPELINE_MINIO_ACCESS_KEY")
+    secret_key = read_secret_arg_or_env(args.secret_key, "COURSE_PIPELINE_MINIO_SECRET_KEY")
+    if not access_key or not secret_key:
+        return out(
+            {
+                "ok": False,
+                "error": {
+                    "code": "MINIO_CREDENTIALS_REQUIRED",
+                    "message": "provide --access-key/--secret-key or env COURSE_PIPELINE_MINIO_ACCESS_KEY/COURSE_PIPELINE_MINIO_SECRET_KEY",
+                },
+            },
+            2,
+        )
+    object_key = args.object_key or file_path.name
+    try:
+        object_url, _ = run_mc_copy(
+            endpoint=args.endpoint,
+            access_key=access_key,
+            secret_key=secret_key,
+            bucket=args.bucket,
+            object_key=object_key,
+            source_file=file_path,
+            make_bucket=args.make_bucket,
+        )
+    except RuntimeError as exc:
+        return out({"ok": False, "error": {"code": str(exc), "message": "install minio client: brew install minio/stable/mc"}}, 2)
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip()
+        return out({"ok": False, "error": {"code": "MINIO_UPLOAD_FAILED", "message": detail or "mc cp failed"}}, 3)
+    except Exception as exc:
+        return out({"ok": False, "error": {"code": "MINIO_UPLOAD_FAILED", "message": str(exc)}}, 3)
+
+    return out(
+        {
+            "ok": True,
+            "file": str(file_path),
+            "bucket": args.bucket,
+            "object_key": object_key,
+            "url": object_url,
+        }
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Local course pipeline operations")
     parser.add_argument("--project-root", default=str(Path(__file__).resolve().parents[2]))
@@ -1341,6 +1505,35 @@ def build_parser() -> argparse.ArgumentParser:
     task_watch.add_argument("--interval", type=int, default=2)
     task_watch.add_argument("--timeout", type=int, default=0)
     task_watch.set_defaults(func=cmd_task_watch)
+
+    package = root.add_parser("package")
+    package_actions = package.add_subparsers(dest="action", required=True)
+
+    package_inspect = package_actions.add_parser("inspect")
+    package_inspect.add_argument("file_path")
+    package_inspect.set_defaults(func=cmd_package_inspect)
+
+    package_catalog = package_actions.add_parser("build-catalog")
+    package_catalog.add_argument("file_path")
+    package_catalog.add_argument("--download-url", required=True)
+    package_catalog.add_argument("--course-id", required=True)
+    package_catalog.add_argument("--title")
+    package_catalog.add_argument("--category", default="video")
+    package_catalog.add_argument("--level", default="entry")
+    package_catalog.add_argument("--cover-url", default="")
+    package_catalog.add_argument("--version", default=1)
+    package_catalog.add_argument("--out", default="catalog.json")
+    package_catalog.set_defaults(func=cmd_package_build_catalog)
+
+    package_upload = package_actions.add_parser("upload-minio")
+    package_upload.add_argument("file_path")
+    package_upload.add_argument("--endpoint", required=True, help="e.g. http://home.rongts.tech:9000")
+    package_upload.add_argument("--bucket", required=True)
+    package_upload.add_argument("--object-key", default="")
+    package_upload.add_argument("--access-key", default="")
+    package_upload.add_argument("--secret-key", default="")
+    package_upload.add_argument("--make-bucket", action="store_true")
+    package_upload.set_defaults(func=cmd_package_upload_minio)
 
     return parser
 

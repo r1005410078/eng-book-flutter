@@ -62,5 +62,22 @@ class TestSchemaFiles(unittest.TestCase):
         )
 
 
+class TestPackageHelpers(unittest.TestCase):
+    def test_sha256_and_size(self):
+        with tempfile.TemporaryDirectory() as td:
+            file_path = Path(td) / "course.zip"
+            file_path.write_bytes(b"abc123")
+            digest, size_bytes = ops.sha256_and_size(file_path)
+            self.assertEqual(
+                digest,
+                "6ca13d52ca70c883e0f0bb101e425a89e8624de51db2d2392593af6a84118090",
+            )
+            self.assertEqual(size_bytes, 6)
+
+    def test_normalize_endpoint_host(self):
+        self.assertEqual(ops.normalize_endpoint_host("http://home.rongts.tech:9000"), "home.rongts.tech:9000")
+        self.assertEqual(ops.normalize_endpoint_host("home.rongts.tech:9000"), "home.rongts.tech:9000")
+
+
 if __name__ == "__main__":
     unittest.main()
