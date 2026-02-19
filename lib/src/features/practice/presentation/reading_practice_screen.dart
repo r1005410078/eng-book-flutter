@@ -5,6 +5,7 @@ import '../../../routing/routes.dart';
 import '../application/local_course_provider.dart';
 import '../data/local_course_package_loader.dart';
 import '../domain/sentence_detail.dart';
+import 'playback_settings_sheet.dart';
 
 class ReadingPracticeScreen extends ConsumerStatefulWidget {
   final String sentenceId;
@@ -144,13 +145,16 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
           // Right: Settings Icon
           IconButton(
             icon: const Icon(Icons.tune_rounded, color: Colors.white, size: 24),
-            onPressed: () {
-              context.push(Routes.playbackSettings);
-            },
+            onPressed: _openPlaybackSettings,
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _openPlaybackSettings() async {
+    if (!mounted) return;
+    await showPracticePlaybackSettingsSheet(context);
   }
 
   Widget _buildBody() {
@@ -229,7 +233,7 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.15),
+                  color: Colors.white.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: const Text(
@@ -243,10 +247,10 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
                 ),
               ),
               const SizedBox(width: 12),
-              Text(
+              const Text(
                 "TRANSCRIPT",
                 style: TextStyle(
-                  color: accentColor,
+                  color: Color(0xFFFF9F29),
                   fontSize: 10,
                   fontWeight: FontWeight.w900,
                   letterSpacing: 1,
@@ -267,7 +271,7 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
           Text(
             "Listen to the conversation and practice speaking.",
             style: TextStyle(
-              color: Colors.white.withOpacity(0.6),
+              color: Colors.white.withValues(alpha: 0.6),
               fontSize: 14,
             ),
           ),
@@ -277,7 +281,7 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
               child: Text(
                 _loadWarning!,
                 style: TextStyle(
-                  color: Colors.amber.withOpacity(0.8),
+                  color: Colors.amber.withValues(alpha: 0.8),
                   fontSize: 12,
                 ),
               ),
@@ -312,7 +316,7 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
                           height: 24,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: accentColor.withOpacity(0.1),
+                            color: accentColor.withValues(alpha: 0.1),
                           ),
                           alignment: Alignment.center,
                           child: const Icon(Icons.check,
@@ -323,15 +327,15 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
                           height: 24,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: Colors.white.withOpacity(0.05),
+                            color: Colors.white.withValues(alpha: 0.05),
                             border: Border.all(
-                                color: Colors.white.withOpacity(0.1)),
+                                color: Colors.white.withValues(alpha: 0.1)),
                           ),
                           alignment: Alignment.center,
                           child: Text(
                             "0", // Or empty if it just means not started
                             style: TextStyle(
-                                color: Colors.white.withOpacity(0.3),
+                                color: Colors.white.withValues(alpha: 0.3),
                                 fontSize: 10),
                           ),
                         ),
@@ -339,7 +343,7 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
                   Text(
                     index % 3 == 0 ? "3x" : "0x",
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.2),
+                      color: Colors.white.withValues(alpha: 0.2),
                       fontSize: 10,
                       fontWeight: FontWeight.w500,
                     ),
@@ -356,7 +360,7 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
                   Text(
                     sentence.text,
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.6),
+                      color: Colors.white.withValues(alpha: 0.6),
                       fontSize: 16,
                       height: 1.5,
                       fontWeight: FontWeight.w500,
@@ -366,7 +370,7 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
                   Text(
                     sentence.translation,
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.3),
+                      color: Colors.white.withValues(alpha: 0.3),
                       fontSize: 14,
                     ),
                   ),
@@ -379,7 +383,7 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
+                color: Colors.white.withValues(alpha: 0.05),
                 shape: BoxShape.circle,
               ),
               child: const Icon(Icons.play_arrow_rounded,
@@ -397,17 +401,18 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
       decoration: BoxDecoration(
         color: activeCardColor,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: accentColor.withOpacity(0.5), width: 1.5),
+        border:
+            Border.all(color: accentColor.withValues(alpha: 0.5), width: 1.5),
         boxShadow: [
           // Glow effect
           BoxShadow(
-            color: accentColor.withOpacity(0.35),
+            color: accentColor.withValues(alpha: 0.35),
             blurRadius: 25,
             spreadRadius: 1,
             offset: const Offset(0, 4),
           ),
           BoxShadow(
-            color: Colors.black.withOpacity(0.4),
+            color: Colors.black.withValues(alpha: 0.4),
             blurRadius: 15,
             offset: const Offset(0, 8),
           ),
@@ -432,7 +437,7 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
                             decoration: BoxDecoration(
                                 color: i < 2
                                     ? accentColor
-                                    : Colors.white.withOpacity(0.1),
+                                    : Colors.white.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(2)),
                           )),
                 ),
@@ -446,7 +451,7 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
                   ),
                 ),
                 const Spacer(),
-                Icon(Icons.bookmark, color: accentColor, size: 20),
+                const Icon(Icons.bookmark, color: accentColor, size: 20),
               ],
             ),
           ),
@@ -475,7 +480,7 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Container(
+                SizedBox(
                   height: 24,
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
@@ -498,7 +503,7 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
                   child: Text(
                     sentence.translation,
                     style: TextStyle(
-                        color: Colors.white.withOpacity(0.5),
+                        color: Colors.white.withValues(alpha: 0.5),
                         fontSize: 14,
                         height: 1.2),
                     maxLines: 2,
@@ -551,14 +556,15 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.06),
+                  color: Colors.white.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white.withOpacity(0.08)),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: 0.08)),
                 ),
                 child: Text(
                   '${e.key}: ${e.value}',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.7),
+                    color: Colors.white.withValues(alpha: 0.7),
                     fontSize: 11,
                   ),
                 ),
@@ -578,12 +584,12 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
         height: 64,
         margin: const EdgeInsets.symmetric(horizontal: 40),
         decoration: BoxDecoration(
-          color: const Color(0xFF2C241B).withOpacity(0.95), // Card color
+          color: const Color(0xFF2C241B).withValues(alpha: 0.95), // Card color
           borderRadius: BorderRadius.circular(32),
-          border: Border.all(color: Colors.white.withOpacity(0.1)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.4),
+              color: Colors.black.withValues(alpha: 0.4),
               blurRadius: 16,
               offset: const Offset(0, 8),
             ),
@@ -619,7 +625,7 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                    color: accentColor.withOpacity(0.4),
+                    color: accentColor.withValues(alpha: 0.4),
                     blurRadius: 8,
                     spreadRadius: 1,
                     offset: const Offset(0, 2),
@@ -639,8 +645,9 @@ class _ReadingPracticeScreenState extends ConsumerState<ReadingPracticeScreen> {
             IconButton(
               icon: const Icon(Icons.arrow_forward, color: Colors.grey),
               onPressed: () {
-                if (_currentIndex < _sentences.length - 1)
+                if (_currentIndex < _sentences.length - 1) {
                   setState(() => _currentIndex++);
+                }
               },
             ),
           ],

@@ -13,9 +13,6 @@ class Routes {
   // 句子练习
   static const String sentencePractice = '/practice/sentence/:id';
 
-  // 播放设置
-  static const String playbackSettings = '/practice/settings';
-
   // 阅读练习 (文本模式)
   static const String readingPractice = '/practice/reading/:id';
 }

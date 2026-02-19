@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../features/home/presentation/home_screen.dart';
 import '../features/download_center/presentation/download_center_screen.dart';
-import '../features/practice/presentation/playback_settings_screen.dart';
 import '../features/practice/presentation/reading_practice_screen.dart';
 import '../features/practice/presentation/sentence_practice_screen.dart';
 import 'routes.dart';
@@ -50,14 +49,6 @@ GoRouter router(Ref ref) {
             ),
           );
         },
-      ),
-      GoRoute(
-        path: Routes.playbackSettings,
-        name: 'playbackSettings',
-        pageBuilder: (context, state) => MaterialPage(
-          key: state.pageKey,
-          child: const PlaybackSettingsScreen(),
-        ),
       ),
       GoRoute(
         path: Routes.readingPractice,

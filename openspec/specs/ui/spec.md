@@ -1,93 +1,116 @@
 # ui Specification
 
 ## Purpose
-TBD - created by archiving change impl-playback-settings. Update Purpose after archive.
+定义当前移动端 MVP 的核心学习界面行为：首页入口、句子练习、阅读模式、播放设置、课程单元切换与学习进度持久化。
+
 ## Requirements
-### Requirement: The Playback Settings screen allows configuring playback speed
+### Requirement: 首页必须自动决定学习入口
 
-The application MUST provide controls to adjust the audio playback speed. Available options should include 0.5x, 0.75x, and 1.0x (normal speed).
+系统 MUST 在进入首页时优先恢复最近学习进度；若无法恢复则回退到可用本地课程的首句；若无可用课程则展示空态引导。
 
-#### Scenario: User changes playback speed
+#### Scenario: 恢复最近学习成功
+- **GIVEN** 本地存在可用课程且 `LearningResumeStore` 中的 `packageRoot/sentenceId` 仍有效
+- **WHEN** 用户打开首页
+- **THEN** 系统进入句子练习页并定位到该句
 
-Given the user is on the Playback Settings screen
-When they tap "0.5x"
-Then the playback speed is set to 0.5
-And the "0.5x" button becomes active
+#### Scenario: 无有效进度时回退到首句
+- **GIVEN** 最近学习进度不存在或已失效，且本地存在可用课程
+- **WHEN** 用户打开首页
+- **THEN** 系统进入首个可用课程的首句
 
-### Requirement: The Playback Settings screen allows toggling subtitles
+#### Scenario: 无可用课程时展示空态
+- **GIVEN** 本地没有可用课程
+- **WHEN** 用户打开首页
+- **THEN** 展示空态页面
+- **AND** 提供“前往下载中心”入口
 
-The application MUST allow users to toggle the visibility of English text, Chinese translation, and a "Blur Default" option for active recall practice.
+### Requirement: 句子练习页必须提供空课程引导
 
-#### Scenario: User toggles English subtitle
+系统 MUST 在句子练习页检测到无可用句子数据时展示引导视图，并允许用户跳转下载中心。
 
-Given the English subtitle is ON
-When the user taps the toggle
-Then the English subtitle turns OFF
+#### Scenario: 句子列表为空
+- **GIVEN** 当前课程加载结果为空
+- **WHEN** 用户进入句子练习页
+- **THEN** 显示空课程引导页
+- **AND** 点击按钮后跳转下载中心
 
-### Requirement: The Playback Settings screen allows configuring playback behavior
+### Requirement: 播放设置必须以底部弹窗提供
 
-The application MUST allow configuration of playback behaviors such as loop count per sentence, auto-pause at the end of sentences, and auto-recording.
+系统 MUST 通过 bottom sheet 展示播放设置，而不是独立设置路由页。
 
-#### Scenario: User changes loop count
+#### Scenario: 从句子练习打开播放设置
+- **GIVEN** 用户在句子练习页
+- **WHEN** 用户点击设置按钮
+- **THEN** 打开播放设置 bottom sheet
 
-Given the loop count is 3
-When the user taps "+"
-Then the loop count becomes 4
+#### Scenario: 从阅读模式打开播放设置
+- **GIVEN** 用户在阅读模式页
+- **WHEN** 用户点击设置按钮
+- **THEN** 打开播放设置 bottom sheet
 
-### Requirement: The Playback Settings screen allows configuring font size
+### Requirement: 播放设置必须支持语速切换
 
-The application MUST provide a slider to adjust the text size of the subtitles, ranging from small to large.
+系统 MUST 提供 `0.5x`、`0.75x`、`1.0x` 三档语速，并在当前会话中立即生效。
 
-#### Scenario: User changes font size
+#### Scenario: 切换到 0.75x
+- **GIVEN** 当前语速为 `1.0x`
+- **WHEN** 用户点击 `0.75x`
+- **THEN** 语速状态更新为 `0.75x`
+- **AND** 当前播放链路按新语速执行
 
-Given the font size slider is at standard position
-When the user drags it to the right
-Then the font size increases
+### Requirement: 播放设置必须支持字幕与显示策略
 
-### Requirement: 入口
+系统 MUST 支持英文字幕开关、中文字幕开关、默认模糊译文，以及字幕大小调节。
 
-必须 (MUST) 通过首页右上角的特定图标打开课程选择页面。
+#### Scenario: 关闭中文字幕
+- **GIVEN** 中文字幕处于开启
+- **WHEN** 用户关闭“显示译文”开关
+- **THEN** 中文字幕在练习界面隐藏
 
-#### Scenario: 打开选择页
+#### Scenario: 调整字幕大小
+- **GIVEN** 字幕大小为默认值
+- **WHEN** 用户拖动“字幕大小”滑杆
+- **THEN** 字幕大小按新值更新
 
-- **Given** 用户在首页
-- **When** 用户点击右上角的“书本/菜单”图标
-- **Then** 课程选择页面应以全屏弹窗的形式出现
+### Requirement: 播放设置必须支持播放完成策略和自动录音
 
-### Requirement: 分类筛选
+系统 MUST 提供播放完成策略选择（单元循环、课程循环、播放完暂停、所有课程循环）及自动录音开关。
 
-页面必须 (MUST) 显示一个横向滚动的分类列表。
+#### Scenario: 切换播放完成策略
+- **GIVEN** 当前策略为“课程循环”
+- **WHEN** 用户切换到“播放完暂停”
+- **THEN** 策略状态更新为“播放完暂停”
 
-#### Scenario: 选择分类
+#### Scenario: 启用自动录音
+- **GIVEN** 自动录音为关闭
+- **WHEN** 用户开启“自动录音”
+- **THEN** 自动录音状态更新为开启
 
-- **Given** 筛选栏显示“全部”、“我的”等
-- **When** 用户点击“视频”
-- **Then** 该标签变为激活状态（橙色背景）
-- **And** 课程列表仅显示视频类型的课程（Mock 逻辑：更新 UI 状态即可）
+### Requirement: 课程与单元切换必须可视化学习进度
 
-### Requirement: 课程网格
+系统 MUST 提供课程/单元选择弹窗，并展示课程与单元的练习次数、进度、熟练度与学习状态。
 
-页面必须 (MUST) 以网格布局展示课程。
+#### Scenario: 打开课程单元选择器
+- **GIVEN** 用户在句子练习页
+- **WHEN** 用户点击课程单元切换入口
+- **THEN** 显示课程列表与单元列表
+- **AND** 每个单元显示学习状态（未开始/学习中/已完成）
 
-#### Scenario: 查看课程
+#### Scenario: 选择新单元后继续学习
+- **GIVEN** 用户在选择器中选中目标单元
+- **WHEN** 用户点击“继续学习”
+- **THEN** 练习页切换到该单元首句
 
-- **Given** 用户查看网格列表
-- **Then** 每个卡片显示封面图、标题、章节数
-- **And** 正在学习的课程显示“继续学习”标签
-- **And** 不同的图标代表不同的媒体类型（播客 vs 视频） - (Mock 数据)
+### Requirement: 学习进度与播放设置必须持久化
 
-### Requirement: 课程详情查看
+系统 MUST 将学习位置、课程练习指标、播放设置持久化，并在后续会话中恢复。
 
-系统必须 (SHALL) 提供课程的详细信息视图，允许用户在开始学习前了解课程内容。
+#### Scenario: 恢复最近学习位置
+- **GIVEN** 用户完成过练习并保存了学习位置
+- **WHEN** 用户重新进入应用首页
+- **THEN** 系统尝试恢复到最近学习句子
 
-#### Scenario: 查看课程详情
-
-- **WHEN** 用户在课程选择页面点击某个课程卡片
-- **THEN** 应用跳转到课程详情页面
-- **AND** 页面显示课程标题、作者、封面图和难度等级
-- **AND** 页面显示统计信息，包括章节数、预计时长和总词汇量
-- **AND** 页面显示“故事情节”部分，包含文本简介
-- **AND** 页面显示“语法重点”部分，列出关键语法标签
-- **AND** 页面显示“你将掌握”部分，列出课程价值点
-- **AND** 底部固定展示一个“开始学习”按钮
-
+#### Scenario: 恢复播放设置
+- **GIVEN** 用户已修改语速或字幕设置
+- **WHEN** 用户再次进入练习页面
+- **THEN** 播放设置从本地存储恢复并生效

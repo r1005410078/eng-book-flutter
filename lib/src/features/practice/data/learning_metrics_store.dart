@@ -163,30 +163,15 @@ class LearningMetricsStore {
     required int totalLessonSentences,
   }) async {
     if (packageRoot.trim().isEmpty || lessonKey.trim().isEmpty) return;
-    _writeQueue = _writeQueue.then((_) async {
-      final snapshot = await loadSnapshot();
-      final next = Map<String, _CourseMetricsRecord>.from(snapshot._courses);
-      final course = next[packageRoot] ?? _CourseMetricsRecord.empty();
-      final units = Map<String, _UnitMetricsRecord>.from(course.units);
-      final unit = units[lessonKey] ?? _UnitMetricsRecord.empty();
-      units[lessonKey] = unit.copyWith(
-        practiceCount: unit.practiceCount + 1,
-        totalSentenceCount: _maxPositive(
-          unit.totalSentenceCount,
-          totalLessonSentences,
-        ),
+    await _enqueueWrite((next) {
+      _updateLessonEntry(
+        next: next,
+        packageRoot: packageRoot,
+        lessonKey: lessonKey,
+        totalCourseSentences: totalCourseSentences,
+        totalLessonSentences: totalLessonSentences,
       );
-      next[packageRoot] = course.copyWith(
-        practiceCount: course.practiceCount + 1,
-        totalSentenceCount: _maxPositive(
-          course.totalSentenceCount,
-          totalCourseSentences,
-        ),
-        units: units,
-      );
-      await _saveSnapshot(LearningMetricsSnapshot._(next));
     });
-    await _writeQueue;
   }
 
   static Future<void> recordSentencePractice({
@@ -201,34 +186,16 @@ class LearningMetricsStore {
         sentenceId.trim().isEmpty) {
       return;
     }
-    _writeQueue = _writeQueue.then((_) async {
-      final snapshot = await loadSnapshot();
-      final next = Map<String, _CourseMetricsRecord>.from(snapshot._courses);
-      final course = next[packageRoot] ?? _CourseMetricsRecord.empty();
-      final units = Map<String, _UnitMetricsRecord>.from(course.units);
-      final unit = units[lessonKey] ?? _UnitMetricsRecord.empty();
-      final nextCourseSentences = Set<String>.from(course.practicedSentenceIds)
-        ..add(sentenceId);
-      final nextUnitSentences = Set<String>.from(unit.practicedSentenceIds)
-        ..add(sentenceId);
-      units[lessonKey] = unit.copyWith(
-        practicedSentenceIds: nextUnitSentences,
-        totalSentenceCount: _maxPositive(
-          unit.totalSentenceCount,
-          totalLessonSentences,
-        ),
+    await _enqueueWrite((next) {
+      _updateSentencePractice(
+        next: next,
+        packageRoot: packageRoot,
+        lessonKey: lessonKey,
+        sentenceId: sentenceId,
+        totalCourseSentences: totalCourseSentences,
+        totalLessonSentences: totalLessonSentences,
       );
-      next[packageRoot] = course.copyWith(
-        practicedSentenceIds: nextCourseSentences,
-        totalSentenceCount: _maxPositive(
-          course.totalSentenceCount,
-          totalCourseSentences,
-        ),
-        units: units,
-      );
-      await _saveSnapshot(LearningMetricsSnapshot._(next));
     });
-    await _writeQueue;
   }
 
   static Future<LearningMetricsSnapshot> loadSnapshot() async {
@@ -254,6 +221,77 @@ class LearningMetricsStore {
   static Future<void> _saveSnapshot(LearningMetricsSnapshot snapshot) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_key, jsonEncode(snapshot.toJson()));
+  }
+
+  static Future<void> _enqueueWrite(
+    void Function(Map<String, _CourseMetricsRecord> next) update,
+  ) async {
+    _writeQueue = _writeQueue.then((_) async {
+      final snapshot = await loadSnapshot();
+      final next = Map<String, _CourseMetricsRecord>.from(snapshot._courses);
+      update(next);
+      await _saveSnapshot(LearningMetricsSnapshot._(next));
+    });
+    await _writeQueue;
+  }
+
+  static void _updateLessonEntry({
+    required Map<String, _CourseMetricsRecord> next,
+    required String packageRoot,
+    required String lessonKey,
+    required int totalCourseSentences,
+    required int totalLessonSentences,
+  }) {
+    final course = next[packageRoot] ?? _CourseMetricsRecord.empty();
+    final units = Map<String, _UnitMetricsRecord>.from(course.units);
+    final unit = units[lessonKey] ?? _UnitMetricsRecord.empty();
+    units[lessonKey] = unit.copyWith(
+      practiceCount: unit.practiceCount + 1,
+      totalSentenceCount: _maxPositive(
+        unit.totalSentenceCount,
+        totalLessonSentences,
+      ),
+    );
+    next[packageRoot] = course.copyWith(
+      practiceCount: course.practiceCount + 1,
+      totalSentenceCount: _maxPositive(
+        course.totalSentenceCount,
+        totalCourseSentences,
+      ),
+      units: units,
+    );
+  }
+
+  static void _updateSentencePractice({
+    required Map<String, _CourseMetricsRecord> next,
+    required String packageRoot,
+    required String lessonKey,
+    required String sentenceId,
+    required int totalCourseSentences,
+    required int totalLessonSentences,
+  }) {
+    final course = next[packageRoot] ?? _CourseMetricsRecord.empty();
+    final units = Map<String, _UnitMetricsRecord>.from(course.units);
+    final unit = units[lessonKey] ?? _UnitMetricsRecord.empty();
+    final nextCourseSentences = Set<String>.from(course.practicedSentenceIds)
+      ..add(sentenceId);
+    final nextUnitSentences = Set<String>.from(unit.practicedSentenceIds)
+      ..add(sentenceId);
+    units[lessonKey] = unit.copyWith(
+      practicedSentenceIds: nextUnitSentences,
+      totalSentenceCount: _maxPositive(
+        unit.totalSentenceCount,
+        totalLessonSentences,
+      ),
+    );
+    next[packageRoot] = course.copyWith(
+      practicedSentenceIds: nextCourseSentences,
+      totalSentenceCount: _maxPositive(
+        course.totalSentenceCount,
+        totalCourseSentences,
+      ),
+      units: units,
+    );
   }
 
   static int _maxPositive(int a, int b) {

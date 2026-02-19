@@ -151,9 +151,4 @@ class PracticePlaybackSettingsStore {
     });
     await _writeQueue;
   }
-
-  static Future<void> clear() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_key);
-  }
 }

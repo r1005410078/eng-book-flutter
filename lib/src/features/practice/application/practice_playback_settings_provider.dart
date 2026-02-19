@@ -19,10 +19,6 @@ class PracticePlaybackSettingsController
     await PracticePlaybackSettingsStore.save(next);
   }
 
-  Future<void> reset() async {
-    await _set(PracticePlaybackSettings.defaults);
-  }
-
   Future<void> setPlaybackSpeed(double value) async {
     await _set(state.copyWith(playbackSpeed: value.clamp(0.5, 1.0).toDouble()));
   }

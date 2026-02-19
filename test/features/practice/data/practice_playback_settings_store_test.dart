@@ -13,7 +13,6 @@ void main() {
       showEnglish: true,
       showChinese: false,
       blurTranslationByDefault: true,
-      loopCount: 4,
       completionMode: PlaybackCompletionMode.allCoursesLoop,
       autoRecord: true,
       subtitleScale: 0.8,
@@ -26,7 +25,6 @@ void main() {
     expect(loaded.showEnglish, isTrue);
     expect(loaded.showChinese, isFalse);
     expect(loaded.blurTranslationByDefault, isTrue);
-    expect(loaded.loopCount, 4);
     expect(loaded.completionMode, PlaybackCompletionMode.allCoursesLoop);
     expect(loaded.autoRecord, isTrue);
     expect(loaded.subtitleScale, 0.8);
@@ -40,8 +38,16 @@ void main() {
     final loaded = await PracticePlaybackSettingsStore.load();
     expect(
         loaded.playbackSpeed, PracticePlaybackSettings.defaults.playbackSpeed);
-    expect(loaded.loopCount, PracticePlaybackSettings.defaults.loopCount);
+    expect(loaded.showEnglish, PracticePlaybackSettings.defaults.showEnglish);
+    expect(loaded.showChinese, PracticePlaybackSettings.defaults.showChinese);
+    expect(
+      loaded.blurTranslationByDefault,
+      PracticePlaybackSettings.defaults.blurTranslationByDefault,
+    );
     expect(loaded.completionMode,
         PracticePlaybackSettings.defaults.completionMode);
+    expect(loaded.autoRecord, PracticePlaybackSettings.defaults.autoRecord);
+    expect(
+        loaded.subtitleScale, PracticePlaybackSettings.defaults.subtitleScale);
   });
 }

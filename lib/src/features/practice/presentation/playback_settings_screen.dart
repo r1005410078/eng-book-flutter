@@ -1,17 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../application/practice_playback_settings_provider.dart';
 import '../data/practice_playback_settings_store.dart';
 
 class PlaybackSettingsScreen extends ConsumerWidget {
-  final bool asBottomSheet;
-
-  const PlaybackSettingsScreen({
-    super.key,
-    this.asBottomSheet = false,
-  });
+  const PlaybackSettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -45,47 +39,7 @@ class PlaybackSettingsScreen extends ConsumerWidget {
       ],
     );
 
-    if (asBottomSheet) {
-      return ColoredBox(color: bgColor, child: content);
-    }
-
-    return Scaffold(
-      backgroundColor: bgColor,
-      appBar: AppBar(
-        backgroundColor: bgColor,
-        elevation: 0,
-        centerTitle: true,
-        title: const Text(
-          '播放设置',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back_ios_new,
-            color: Colors.white,
-            size: 20,
-          ),
-          onPressed: () => context.pop(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: controller.reset,
-            child: const Text(
-              '重置',
-              style: TextStyle(
-                color: Color(0xFFFF9F29),
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ],
-      ),
-      body: content,
-    );
+    return ColoredBox(color: bgColor, child: content);
   }
 
   Widget _buildSectionTitle(String title) {

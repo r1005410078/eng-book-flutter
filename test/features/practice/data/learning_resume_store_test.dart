@@ -79,4 +79,20 @@ void main() {
     expect(loaded.courseTitle, 'Any Course');
     expect(loaded.sentenceId, '143');
   });
+
+  test('clear wins against in-flight stale save writes', () async {
+    const resume = LearningResume(
+      packageRoot: '/tmp/package_a',
+      courseTitle: 'Course A',
+      sentenceId: '01-0001',
+      lessonId: '01',
+    );
+
+    final pendingSave = LearningResumeStore.save(resume);
+    final pendingClear = LearningResumeStore.clear();
+    await Future.wait([pendingSave, pendingClear]);
+
+    final loaded = await LearningResumeStore.load();
+    expect(loaded, isNull);
+  });
 }

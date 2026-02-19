@@ -48,13 +48,11 @@ class LearningResumeStore {
 
   static Future<void> save(LearningResume resume) async {
     final token = ++_latestSaveToken;
-    _writeQueue = _writeQueue.then((_) async {
+    await _enqueueWrite((prefs) async {
       // Drop stale save requests and keep only the newest one.
       if (token != _latestSaveToken) return;
-      final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_key, jsonEncode(resume.toJson()));
     });
-    await _writeQueue;
   }
 
   static Future<LearningResume?> load() async {
@@ -71,7 +69,17 @@ class LearningResumeStore {
   }
 
   static Future<void> clear() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_key);
+    _latestSaveToken++;
+    await _enqueueWrite((prefs) => prefs.remove(_key));
+  }
+
+  static Future<void> _enqueueWrite(
+    Future<void> Function(SharedPreferences prefs) write,
+  ) async {
+    _writeQueue = _writeQueue.then((_) async {
+      final prefs = await SharedPreferences.getInstance();
+      await write(prefs);
+    });
+    await _writeQueue;
   }
 }
