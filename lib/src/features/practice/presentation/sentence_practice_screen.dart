@@ -10,9 +10,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:video_player/video_player.dart';
 import '../application/local_course_provider.dart';
+import '../application/practice_playback_flow_policy.dart';
+import '../application/practice_playback_settings_provider.dart';
 import '../data/learning_metrics_store.dart';
 import '../data/local_course_package_loader.dart';
 import '../data/learning_resume_store.dart';
+import '../data/practice_playback_settings_store.dart';
 import '../domain/sentence_detail.dart';
 import '../../../routing/routes.dart';
 import 'playback_settings_screen.dart';
@@ -20,8 +23,6 @@ import 'widgets/short_video_bottom_bar.dart';
 import 'widgets/short_video_caption.dart';
 import 'widgets/short_video_header.dart';
 import 'widgets/short_video_video_card.dart';
-
-enum SubtitleMode { bilingual, englishOnly, hidden }
 
 enum ShadowingPhase { idle, listening, recording, advancing }
 
@@ -116,7 +117,10 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   String? _currentCourseTitle;
   String? _currentMediaPath;
 
-  SubtitleMode _subtitleMode = SubtitleMode.bilingual;
+  bool _showEnglish = true;
+  bool _showChinese = true;
+  bool _blurTranslationByDefault = false;
+  double _subtitleScale = 0.5;
   late VideoPlayerController _videoController;
   late AudioPlayer _audioPlayer;
   StreamSubscription<Duration>? _audioPositionSub;
@@ -143,7 +147,10 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
 
   // Video Controls State
   final double _volume = 1.0;
-  final double _playbackSpeed = 1.0;
+  double _playbackSpeed = 1.0;
+  int _loopCount = 1;
+  PlaybackCompletionMode _completionMode = PlaybackCompletionMode.courseLoop;
+  bool _autoRecord = false;
   bool _isFullscreen = false;
   late final PageController _lessonPageController;
   bool _isLessonPaging = false;
@@ -162,6 +169,10 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   final Map<int, VideoPlayerController> _previewControllerCache = {};
   final Set<int> _previewControllerLoading = {};
   String? _lastRecordedLessonKey;
+  ProviderSubscription<PracticePlaybackSettings>? _settingsSubscription;
+  String? _loopSentenceId;
+  int _remainingLoopsForSentence = 1;
+  bool _isHandlingSentenceEnd = false;
 
   @override
   void initState() {
@@ -191,6 +202,16 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       Uri.parse(
           'https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4'),
     );
+    final settings = ref.read(practicePlaybackSettingsProvider);
+    _syncSettingsState(settings);
+    _settingsSubscription = ref.listenManual<PracticePlaybackSettings>(
+      practicePlaybackSettingsProvider,
+      (previous, next) {
+        _syncSettingsState(next);
+        unawaited(_applyPlaybackSettings(next));
+      },
+      fireImmediately: true,
+    );
     _initializeContent();
   }
 
@@ -208,6 +229,48 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       courseTitleInput: courseTitleInput,
       targetSentenceId: widget.sentenceId,
     );
+  }
+
+  void _syncSettingsState(PracticePlaybackSettings settings) {
+    _playbackSpeed = settings.playbackSpeed;
+    _showEnglish = settings.showEnglish;
+    _showChinese = settings.showChinese;
+    _blurTranslationByDefault = settings.blurTranslationByDefault;
+    _subtitleScale = settings.subtitleScale;
+    _loopCount = settings.loopCount;
+    _completionMode = settings.completionMode;
+    _autoRecord = settings.autoRecord;
+    if (_sentences.isNotEmpty &&
+        _currentIndex >= 0 &&
+        _currentIndex < _sentences.length) {
+      _resetSentenceLoopState(_sentences[_currentIndex].id);
+    }
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _applyPlaybackSettings(PracticePlaybackSettings settings) async {
+    try {
+      await _audioPlayer.setSpeed(settings.playbackSpeed);
+    } catch (_) {
+      // Keep playback running even if speed update fails on some sources.
+    }
+    if (_videoController.value.isInitialized) {
+      try {
+        await _videoController.setPlaybackSpeed(settings.playbackSpeed);
+      } catch (_) {
+        // Ignore to avoid interrupting practice flow.
+      }
+    }
+    for (final controller in _previewControllerCache.values) {
+      if (!controller.value.isInitialized) continue;
+      try {
+        await controller.setPlaybackSpeed(settings.playbackSpeed);
+      } catch (_) {
+        // Ignore stale preview updates.
+      }
+    }
   }
 
   Future<void> _loadCourseContent({
@@ -280,6 +343,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       );
     }
     _lessonLastSentenceIndex[_lessonKeyAt(targetIndex)] = targetIndex;
+    _resetSentenceLoopState(list[targetIndex].id);
     _cacheCurrentLessonPlayingState();
     unawaited(_recordPracticeForIndex(targetIndex, countLessonEntry: true));
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -449,6 +513,120 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
     }
   }
 
+  void _resetSentenceLoopState(String sentenceId) {
+    if (_loopSentenceId == sentenceId) return;
+    _loopSentenceId = sentenceId;
+    _remainingLoopsForSentence = _loopCount.clamp(1, 10);
+  }
+
+  Future<void> _handleSentenceEnd() async {
+    if (_isHandlingSentenceEnd) return;
+    if (_currentIndex < 0 || _currentIndex >= _sentences.length) return;
+    _isHandlingSentenceEnd = true;
+    try {
+      final shouldContinue = _isPlaying;
+      final current = _sentences[_currentIndex];
+      _resetSentenceLoopState(current.id);
+      final decision = decideSentenceEndAction(
+        remainingLoops: _remainingLoopsForSentence,
+      );
+      _remainingLoopsForSentence = decision.nextRemainingLoops;
+      if (decision.action == SentenceEndAction.loopCurrent) {
+        if (_isAudioMode) {
+          await _audioPlayer.seek(current.startTime);
+          if (_isPlaying && !_audioPlayer.playing) {
+            await _audioPlayer.play();
+          }
+        } else if (_videoController.value.isInitialized) {
+          await _videoController.seekTo(current.startTime);
+          if (_isPlaying && !_videoController.value.isPlaying) {
+            await _videoController.play();
+          }
+        }
+        return;
+      }
+
+      final nextIndex = _currentIndex + 1;
+      if (nextIndex >= 0 && nextIndex < _sentences.length) {
+        final crossesLesson =
+            _lessonKeyAt(nextIndex) != _lessonKeyAt(_currentIndex);
+        final bounds = _lessonBoundsForIndex(_currentIndex);
+        if (_completionMode == PlaybackCompletionMode.unitLoop &&
+            _currentIndex >= bounds.end) {
+          await _seekToSentence(bounds.start);
+          if (shouldContinue && !_isPlaying) {
+            await _playCurrentMedia();
+          }
+          return;
+        }
+        await _seekToSentence(nextIndex);
+        if (shouldContinue &&
+            _completionMode == PlaybackCompletionMode.courseLoop &&
+            crossesLesson &&
+            !_isPlaying) {
+          await _playCurrentMedia();
+        }
+        return;
+      }
+
+      if (_completionMode == PlaybackCompletionMode.courseLoop) {
+        await _seekToSentence(0);
+        if (shouldContinue && !_isPlaying) {
+          await _playCurrentMedia();
+        }
+        return;
+      }
+      if (_completionMode == PlaybackCompletionMode.pauseAfterFinish) {
+        await _pauseCurrentMedia();
+        return;
+      }
+      if (_completionMode == PlaybackCompletionMode.allCoursesLoop) {
+        final moved = await _moveToNextCourseForLoop();
+        if (!moved) {
+          await _pauseCurrentMedia();
+        }
+      }
+    } finally {
+      _isHandlingSentenceEnd = false;
+    }
+  }
+
+  Future<bool> _moveToNextCourseForLoop() async {
+    final currentPackage =
+        (_currentPackageRoot ?? (_sentences[_currentIndex].packageRoot ?? ''))
+            .trim();
+    final catalogs = await (widget.loadCourseCatalogsOverride?.call() ??
+        listLocalCourseCatalogs());
+    final validCatalogs = catalogs
+        .where(
+          (catalog) =>
+              catalog.packageRoot.trim().isNotEmpty && catalog.units.isNotEmpty,
+        )
+        .toList();
+    if (validCatalogs.isEmpty) {
+      return false;
+    }
+    final currentIdx = validCatalogs.indexWhere(
+      (catalog) => catalog.packageRoot.trim() == currentPackage,
+    );
+    final nextIdx =
+        currentIdx == -1 ? 0 : (currentIdx + 1) % validCatalogs.length;
+    final nextCatalog = validCatalogs[nextIdx];
+    final nextRoot = nextCatalog.packageRoot.trim();
+    final nextSentenceId = nextCatalog.units.first.firstSentenceId;
+    if (nextRoot.isEmpty || nextSentenceId.trim().isEmpty) return false;
+    if (nextRoot == currentPackage) {
+      await _seekToSentence(0);
+      return true;
+    }
+    await _loadCourseContent(
+      packageRoot: nextRoot,
+      courseTitleInput: nextCatalog.title,
+      targetSentenceId: nextSentenceId,
+    );
+    return true;
+  }
+
   // Waveform preparation removed
   // Future<void> _prepareWaveform() async { ... }
 
@@ -482,6 +660,13 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       }
       return;
     }
+    if (_currentIndex >= 0 && _currentIndex < _sentences.length) {
+      final current = _sentences[_currentIndex];
+      if (_isPlaying && !_isSeeking && currentPos >= current.endTime) {
+        unawaited(_handleSentenceEnd());
+        return;
+      }
+    }
 
     // Only sync inside current lesson to avoid cross-lesson timestamp collisions.
     final bounds = _lessonBoundsForIndex(_currentIndex);
@@ -494,6 +679,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
             _currentIndex = i;
           });
           _lessonLastSentenceIndex[_lessonKeyAt(i)] = i;
+          _resetSentenceLoopState(_sentences[i].id);
           unawaited(_persistLearningResume());
           unawaited(_recordPracticeForIndex(i));
         }
@@ -517,6 +703,13 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       }
       return;
     }
+    if (_currentIndex >= 0 && _currentIndex < _sentences.length) {
+      final current = _sentences[_currentIndex];
+      if (_isPlaying && !_isSeeking && currentPos >= current.endTime) {
+        unawaited(_handleSentenceEnd());
+        return;
+      }
+    }
     final bounds = _lessonBoundsForIndex(_currentIndex);
     for (int i = bounds.start; i <= bounds.end; i++) {
       final s = _sentences[i];
@@ -526,6 +719,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
             _currentIndex = i;
           });
           _lessonLastSentenceIndex[_lessonKeyAt(i)] = i;
+          _resetSentenceLoopState(_sentences[i].id);
           unawaited(_persistLearningResume());
           unawaited(_recordPracticeForIndex(i));
         }
@@ -576,6 +770,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _settingsSubscription?.close();
     _clearPreviewControllerCache();
     _lessonPageController.dispose();
     _exitFullscreenMode();
@@ -616,13 +811,9 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   }
 
   void _cycleSubtitleMode() {
-    setState(() {
-      _subtitleMode = switch (_subtitleMode) {
-        SubtitleMode.bilingual => SubtitleMode.englishOnly,
-        SubtitleMode.englishOnly => SubtitleMode.hidden,
-        SubtitleMode.hidden => SubtitleMode.bilingual,
-      };
-    });
+    unawaited(
+      ref.read(practicePlaybackSettingsProvider.notifier).cycleSubtitleMode(),
+    );
     _onUserInteraction();
   }
 
@@ -714,36 +905,46 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
       await _pauseCurrentMedia();
       if (!_isShadowingMode || sessionId != _shadowingSessionId) return;
 
-      final canRecord = await _audioRecorder.hasPermission();
-      if (canRecord) {
-        try {
-          final recordPath = await _nextShadowingRecordPath(sentence.id);
-          await _audioRecorder.start(
-            const RecordConfig(
-              encoder: AudioEncoder.aacLc,
-              sampleRate: 16000,
-              bitRate: 64000,
-            ),
-            path: recordPath,
-          );
-          if (mounted) {
-            setState(() {
+      if (_autoRecord) {
+        final availability = await detectAutoRecordAvailability(
+          AudioRecorderPermissionProbe(_audioRecorder),
+        );
+        if (availability == AutoRecordAvailability.available) {
+          try {
+            final recordPath = await _nextShadowingRecordPath(sentence.id);
+            await _audioRecorder.start(
+              const RecordConfig(
+                encoder: AudioEncoder.aacLc,
+                sampleRate: 16000,
+                bitRate: 64000,
+              ),
+              path: recordPath,
+            );
+            if (mounted) {
+              setState(() {
+                _isShadowingRecording = true;
+              });
+            } else {
               _isShadowingRecording = true;
-            });
-          } else {
-            _isShadowingRecording = true;
+            }
+          } catch (_) {
+            if (mounted) {
+              setState(() {
+                _loadWarning = '录音启动失败，已跳过本句录音。';
+              });
+            }
           }
-        } catch (_) {
-          if (mounted) {
-            setState(() {
-              _loadWarning = '录音启动失败，已跳过本句录音。';
-            });
-          }
+        } else if (availability == AutoRecordAvailability.permissionDenied &&
+            mounted) {
+          setState(() {
+            _loadWarning = '录音权限未开启，自动录音已跳过。';
+          });
+        } else if (availability == AutoRecordAvailability.unsupported &&
+            mounted) {
+          setState(() {
+            _loadWarning = '当前设备不支持自动录音，已跳过录音。';
+          });
         }
-      } else if (mounted) {
-        setState(() {
-          _loadWarning = '录音权限未开启，跟读模式将跳过录音。';
-        });
       }
 
       _startShadowingCountdown(recordWindow);
@@ -1411,8 +1612,10 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
           text: sentence.text,
           phonetic: sentence.phonetic,
           translation: sentence.translation,
-          showEnglish: _subtitleMode != SubtitleMode.hidden,
-          showChinese: _subtitleMode == SubtitleMode.bilingual,
+          showEnglish: _showEnglish,
+          showChinese: _showChinese,
+          blurTranslationByDefault: _blurTranslationByDefault,
+          subtitleScale: _subtitleScale,
           compact: compactLayout,
         ),
       ),
@@ -1478,6 +1681,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         duration: activeDuration,
       );
       _lessonLastSentenceIndex[_lessonKeyAt(index)] = index;
+      _resetSentenceLoopState(_sentences[index].id);
       _cacheCurrentLessonPlayingState();
       _syncLessonPageWithCurrentSentence();
       final targetLessonKey = _lessonKeyAt(index);
@@ -1579,11 +1783,10 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   }
 
   IconData _subtitleIcon() {
-    return switch (_subtitleMode) {
-      SubtitleMode.bilingual => Icons.subtitles_rounded,
-      SubtitleMode.englishOnly => Icons.closed_caption_outlined,
-      SubtitleMode.hidden => Icons.subtitles_off_outlined,
-    };
+    if (_showEnglish && _showChinese) return Icons.subtitles_rounded;
+    if (_showEnglish && !_showChinese) return Icons.closed_caption_outlined;
+    if (!_showEnglish && !_showChinese) return Icons.subtitles_off_outlined;
+    return Icons.translate_rounded;
   }
 
   @override
@@ -1775,8 +1978,6 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   }) {
     final sentence = _sentences[sentenceIndex];
     final pageControlsVisible = _isSentenceSwitching || !pageIsPlaying;
-    final controlsOverlayVisible =
-        isActivePage && pageControlsVisible && !_isShadowingMode;
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
       onHorizontalDragUpdate:
@@ -1791,7 +1992,7 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
                 const SizedBox(height: 6),
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 6, 20, 10),
+                    padding: const EdgeInsets.fromLTRB(20, 6, 20, 18),
                     child: Column(
                       children: [
                         if (_loadWarning != null &&
@@ -1880,32 +2081,6 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
               ],
             ),
           ),
-          if (controlsOverlayVisible)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: IgnorePointer(
-                child: ClipRect(
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                    child: Container(
-                      height: MediaQuery.of(context).padding.bottom + 92,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.black.withValues(alpha: 0.06),
-                            Colors.black.withValues(alpha: 0.34),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
           if (isActivePage)
             Align(
               alignment: Alignment.bottomCenter,

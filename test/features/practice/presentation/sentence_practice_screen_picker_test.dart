@@ -135,11 +135,12 @@ void main() {
     await tester.pumpWidget(buildApp());
     await settle(tester);
 
-    expect(find.text('课程A'), findsOneWidget);
+    expect(find.text('A单元1'), findsOneWidget);
     expect(find.text('A sentence 1'), findsOneWidget);
 
-    await tester.tap(find.text('课程A'));
+    await tester.tap(find.text('A单元1'));
     await settle(tester);
+    expect(find.text('课程A'), findsOneWidget);
     expect(find.textContaining('练习 1 次'), findsWidgets);
     expect(find.textContaining('练习 0 次 · 0% · 熟练度 0'), findsWidgets);
     expect(find.textContaining('已完成 · 练习 1 次'), findsOneWidget);
@@ -152,7 +153,7 @@ void main() {
     await tester.tap(find.text('继续学习'));
     await settle(tester);
 
-    expect(find.text('课程B'), findsOneWidget);
+    expect(find.text('B单元1'), findsOneWidget);
     expect(find.text('B sentence 1'), findsOneWidget);
     expect(find.text('A sentence 1'), findsNothing);
   });
@@ -162,16 +163,16 @@ void main() {
     await tester.pumpWidget(buildApp());
     await settle(tester);
 
-    expect(find.text('课程A'), findsOneWidget);
+    expect(find.text('A单元1'), findsOneWidget);
     expect(find.text('A sentence 1'), findsOneWidget);
 
-    await tester.tap(find.text('课程A'));
+    await tester.tap(find.text('A单元1'));
     await settle(tester);
 
     await tester.tapAt(const Offset(8, 8));
     await settle(tester);
 
-    expect(find.text('课程A'), findsOneWidget);
+    expect(find.text('A单元1'), findsOneWidget);
     expect(find.text('A sentence 1'), findsOneWidget);
     expect(find.text('B sentence 1'), findsNothing);
   });

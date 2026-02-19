@@ -49,21 +49,30 @@ class ShortVideoBottomBar extends StatelessWidget {
 
     return Padding(
       padding: EdgeInsets.fromLTRB(
-        insets.left + 14,
+        insets.left + 12,
         6,
-        insets.right + 14,
+        insets.right + 12,
         bottomInset,
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(11),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onLongPress: onLongPressBar,
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+            filter: ImageFilter.blur(sigmaX: 3.2, sigmaY: 3.2),
             child: Container(
-              color: Colors.black.withValues(alpha: 0.16),
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.045),
+                    Colors.black.withValues(alpha: 0.07),
+                  ],
+                ),
+              ),
+              padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [

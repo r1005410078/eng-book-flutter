@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-class PlaybackSettingsScreen extends ConsumerStatefulWidget {
+import '../application/practice_playback_settings_provider.dart';
+import '../data/practice_playback_settings_store.dart';
+
+class PlaybackSettingsScreen extends ConsumerWidget {
   final bool asBottomSheet;
 
   const PlaybackSettingsScreen({
@@ -11,89 +14,77 @@ class PlaybackSettingsScreen extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<PlaybackSettingsScreen> createState() =>
-      _PlaybackSettingsScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    const bgColor = Color(0xFF1a120b);
+    const accentColor = Color(0xFFFF9F29);
 
-class _PlaybackSettingsScreenState
-    extends ConsumerState<PlaybackSettingsScreen> {
-  // Mock State
-  double _playbackSpeed = 1.0;
-  bool _showEnglish = true;
-  bool _showChinese = true;
-  bool _blurTranslation = false;
-  int _loopCount = 3;
-  bool _autoPause = true;
-  bool _autoRecord = false;
-  double _fontSize = 0.5; // Slider value 0.0 to 1.0
-
-  @override
-  Widget build(BuildContext context) {
-    const bgColor = Color(0xFF1a120b); // Dark brown/black as per latest design
-    const accentColor = Color(0xFFFF9F29); // Orange
+    final settings = ref.watch(practicePlaybackSettingsProvider);
+    final controller = ref.read(practicePlaybackSettingsProvider.notifier);
 
     final content = ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        _buildSpeedSection(accentColor),
+        _buildSpeedSection(settings, controller, accentColor),
         const SizedBox(height: 32),
-        _buildSubtitleSection(accentColor),
+        _buildSubtitleSection(settings, controller, accentColor),
         const SizedBox(height: 32),
-        _buildBehaviorSection(accentColor),
+        _buildBehaviorSection(settings, controller, accentColor),
         const SizedBox(height: 32),
-        _buildInterfaceSection(accentColor),
+        _buildInterfaceSection(settings, controller, accentColor),
         const SizedBox(height: 32),
         Center(
           child: Text(
             'PLAYER VERSION 2.4.0 (100LS BUILD)',
-            style:
-                TextStyle(color: Colors.white.withOpacity(0.1), fontSize: 10),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.1),
+              fontSize: 10,
+            ),
           ),
         ),
         const SizedBox(height: 20),
       ],
     );
 
-    if (widget.asBottomSheet) {
+    if (asBottomSheet) {
       return ColoredBox(color: bgColor, child: content);
     }
 
     return Scaffold(
       backgroundColor: bgColor,
-      appBar: _buildPageAppBar(accentColor),
-      body: content,
-    );
-  }
-
-  PreferredSizeWidget _buildPageAppBar(Color accentColor) {
-    return AppBar(
-      backgroundColor: const Color(0xFF1a120b),
-      elevation: 0,
-      centerTitle: true,
-      title: const Text(
-        '播放设置',
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      leading: IconButton(
-        icon:
-            const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
-        onPressed: () => context.pop(),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () {
-            // TODO: Reset logic
-          },
-          child: Text(
-            '重置',
-            style: TextStyle(color: accentColor, fontWeight: FontWeight.bold),
+      appBar: AppBar(
+        backgroundColor: bgColor,
+        elevation: 0,
+        centerTitle: true,
+        title: const Text(
+          '播放设置',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
           ),
         ),
-      ],
+        leading: IconButton(
+          icon: const Icon(
+            Icons.arrow_back_ios_new,
+            color: Colors.white,
+            size: 20,
+          ),
+          onPressed: () => context.pop(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: controller.reset,
+            child: const Text(
+              '重置',
+              style: TextStyle(
+                color: Color(0xFFFF9F29),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: content,
     );
   }
 
@@ -111,7 +102,11 @@ class _PlaybackSettingsScreenState
     );
   }
 
-  Widget _buildSpeedSection(Color accentColor) {
+  Widget _buildSpeedSection(
+    PracticePlaybackSettings settings,
+    PracticePlaybackSettingsController controller,
+    Color accentColor,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -119,14 +114,20 @@ class _PlaybackSettingsScreenState
         Container(
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.05),
+            color: Colors.white.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
             children: [
-              _buildSpeedButton(0.5, accentColor),
-              _buildSpeedButton(0.75, accentColor),
-              _buildSpeedButton(1.0, accentColor),
+              _buildSpeedButton(0.5, settings.playbackSpeed, accentColor, () {
+                controller.setPlaybackSpeed(0.5);
+              }),
+              _buildSpeedButton(0.75, settings.playbackSpeed, accentColor, () {
+                controller.setPlaybackSpeed(0.75);
+              }),
+              _buildSpeedButton(1.0, settings.playbackSpeed, accentColor, () {
+                controller.setPlaybackSpeed(1.0);
+              }),
             ],
           ),
         ),
@@ -139,23 +140,21 @@ class _PlaybackSettingsScreenState
     );
   }
 
-  Widget _buildSpeedButton(double speed, Color accentColor) {
-    final isSelected = _playbackSpeed == speed;
+  Widget _buildSpeedButton(
+    double speed,
+    double current,
+    Color accentColor,
+    VoidCallback onTap,
+  ) {
+    final isSelected = current == speed;
     return Expanded(
       child: GestureDetector(
-        onTap: () {
-          setState(() {
-            _playbackSpeed = speed;
-          });
-        },
+        onTap: onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
-            color: isSelected
-                ? const Color(0xFF3E3524)
-                : Colors.transparent, // Dark yellowish brown for selected
+            color: isSelected ? const Color(0xFF3E3524) : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
-            // border: isSelected ? Border.all(color: accentColor.withOpacity(0.5)) : null,
           ),
           alignment: Alignment.center,
           child: Text(
@@ -170,14 +169,18 @@ class _PlaybackSettingsScreenState
     );
   }
 
-  Widget _buildSubtitleSection(Color accentColor) {
+  Widget _buildSubtitleSection(
+    PracticePlaybackSettings settings,
+    PracticePlaybackSettingsController controller,
+    Color accentColor,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionTitle('字幕显示'),
         Container(
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.05),
+            color: Colors.white.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(16),
           ),
           child: Column(
@@ -185,25 +188,25 @@ class _PlaybackSettingsScreenState
               _buildSwitchTile(
                 title: '显示原文 (英文)',
                 icon: Icons.translate,
-                value: _showEnglish,
-                onChanged: (v) => setState(() => _showEnglish = v),
+                value: settings.showEnglish,
+                onChanged: controller.setShowEnglish,
                 accentColor: accentColor,
               ),
-              Divider(height: 1, color: Colors.white.withOpacity(0.05)),
+              Divider(height: 1, color: Colors.white.withValues(alpha: 0.05)),
               _buildSwitchTile(
                 title: '显示译文 (中文)',
                 icon: Icons.subtitles,
-                value: _showChinese,
-                onChanged: (v) => setState(() => _showChinese = v),
+                value: settings.showChinese,
+                onChanged: controller.setShowChinese,
                 accentColor: accentColor,
               ),
-              Divider(height: 1, color: Colors.white.withOpacity(0.05)),
+              Divider(height: 1, color: Colors.white.withValues(alpha: 0.05)),
               _buildSwitchTile(
                 title: '默认模糊译文',
                 subtitle: '点击译文区域才显示，辅助主动回忆',
                 icon: Icons.blur_on,
-                value: _blurTranslation,
-                onChanged: (v) => setState(() => _blurTranslation = v),
+                value: settings.blurTranslationByDefault,
+                onChanged: controller.setBlurTranslationByDefault,
                 accentColor: accentColor,
               ),
             ],
@@ -228,7 +231,7 @@ class _PlaybackSettingsScreenState
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
+              color: Colors.white.withValues(alpha: 0.05),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: Colors.grey, size: 20),
@@ -238,14 +241,17 @@ class _PlaybackSettingsScreenState
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: const TextStyle(color: Colors.white, fontSize: 16)),
+                Text(
+                  title,
+                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                ),
                 if (subtitle != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
-                    child: Text(subtitle,
-                        style:
-                            TextStyle(color: Colors.grey[600], fontSize: 12)),
+                    child: Text(
+                      subtitle,
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    ),
                   ),
               ],
             ),
@@ -255,10 +261,15 @@ class _PlaybackSettingsScreenState
             child: Switch(
               value: value,
               onChanged: onChanged,
-              activeColor: Colors.white,
+              activeThumbColor: Colors.white,
               activeTrackColor: accentColor,
-              inactiveThumbColor: Colors.grey,
-              inactiveTrackColor: Colors.grey.withOpacity(0.2),
+              thumbColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return Colors.white;
+                }
+                return Colors.grey;
+              }),
+              inactiveTrackColor: Colors.grey.withValues(alpha: 0.2),
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
           ),
@@ -267,19 +278,28 @@ class _PlaybackSettingsScreenState
     );
   }
 
-  Widget _buildBehaviorSection(Color accentColor) {
+  Widget _buildBehaviorSection(
+    PracticePlaybackSettings settings,
+    PracticePlaybackSettingsController controller,
+    Color accentColor,
+  ) {
+    final modeLabels = <PlaybackCompletionMode, String>{
+      PlaybackCompletionMode.unitLoop: '单元循环',
+      PlaybackCompletionMode.courseLoop: '课程循环',
+      PlaybackCompletionMode.pauseAfterFinish: '播放完暂停',
+      PlaybackCompletionMode.allCoursesLoop: '所有课程循环',
+    };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildSectionTitle('播放行为'),
         Container(
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.05),
+            color: Colors.white.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(16),
           ),
           child: Column(
             children: [
-              // Loop Counter
               Padding(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -288,37 +308,44 @@ class _PlaybackSettingsScreenState
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.05),
+                        color: Colors.white.withValues(alpha: 0.05),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.repeat_one,
-                          color: Colors.grey, size: 20),
+                      child: const Icon(
+                        Icons.repeat_one,
+                        color: Colors.grey,
+                        size: 20,
+                      ),
                     ),
                     const SizedBox(width: 16),
-                    const Text('单句循环次数',
-                        style: TextStyle(color: Colors.white, fontSize: 16)),
+                    const Text(
+                      '单句循环次数',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
                     const Spacer(),
                     Container(
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.1),
+                        color: Colors.white.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
                         children: [
                           _buildCounterButton(Icons.remove, () {
-                            if (_loopCount > 1) setState(() => _loopCount--);
+                            controller.setLoopCount(settings.loopCount - 1);
                           }),
-                          Container(
+                          SizedBox(
                             width: 32,
-                            alignment: Alignment.center,
                             child: Text(
-                              '$_loopCount',
+                              '${settings.loopCount}',
+                              textAlign: TextAlign.center,
                               style: const TextStyle(
-                                  color: Colors.white, fontSize: 14),
+                                color: Colors.white,
+                                fontSize: 14,
+                              ),
                             ),
                           ),
                           _buildCounterButton(Icons.add, () {
-                            setState(() => _loopCount++);
+                            controller.setLoopCount(settings.loopCount + 1);
                           }),
                         ],
                       ),
@@ -326,21 +353,69 @@ class _PlaybackSettingsScreenState
                   ],
                 ),
               ),
-              Divider(height: 1, color: Colors.white.withOpacity(0.05)),
-              _buildSwitchTile(
-                title: '句末自动暂停',
-                subtitle: '留出跟读时间',
-                icon: Icons.timer_outlined,
-                value: _autoPause,
-                onChanged: (v) => setState(() => _autoPause = v),
-                accentColor: accentColor,
+              Divider(height: 1, color: Colors.white.withValues(alpha: 0.05)),
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '播放完成后',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.9),
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: PlaybackCompletionMode.values.map((mode) {
+                        final selected = settings.completionMode == mode;
+                        return GestureDetector(
+                          onTap: () => controller.setCompletionMode(mode),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: selected
+                                  ? accentColor.withValues(alpha: 0.22)
+                                  : Colors.white.withValues(alpha: 0.04),
+                              borderRadius: BorderRadius.circular(9),
+                              border: Border.all(
+                                color: selected
+                                    ? accentColor.withValues(alpha: 0.75)
+                                    : Colors.white.withValues(alpha: 0.08),
+                              ),
+                            ),
+                            child: Text(
+                              modeLabels[mode]!,
+                              style: TextStyle(
+                                color: selected
+                                    ? accentColor
+                                    : Colors.white.withValues(alpha: 0.78),
+                                fontSize: 13,
+                                fontWeight: selected
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
               ),
-              Divider(height: 1, color: Colors.white.withOpacity(0.05)),
+              Divider(height: 1, color: Colors.white.withValues(alpha: 0.05)),
               _buildSwitchTile(
                 title: '自动录音',
                 icon: Icons.mic_none,
-                value: _autoRecord,
-                onChanged: (v) => setState(() => _autoRecord = v),
+                value: settings.autoRecord,
+                onChanged: controller.setAutoRecord,
                 accentColor: accentColor,
               ),
             ],
@@ -361,7 +436,13 @@ class _PlaybackSettingsScreenState
     );
   }
 
-  Widget _buildInterfaceSection(Color accentColor) {
+  Widget _buildInterfaceSection(
+    PracticePlaybackSettings settings,
+    PracticePlaybackSettingsController controller,
+    Color accentColor,
+  ) {
+    final scale = settings.subtitleScale;
+    final scaleLabel = scale < 0.34 ? '较小' : (scale < 0.67 ? '标准' : '较大');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -369,7 +450,7 @@ class _PlaybackSettingsScreenState
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.05),
+            color: Colors.white.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(16),
           ),
           child: Column(
@@ -381,39 +462,47 @@ class _PlaybackSettingsScreenState
                     children: [
                       Icon(Icons.format_size, color: Colors.grey, size: 20),
                       SizedBox(width: 12),
-                      Text('字幕大小',
-                          style: TextStyle(color: Colors.white, fontSize: 16)),
+                      Text(
+                        '字幕大小',
+                        style: TextStyle(color: Colors.white, fontSize: 16),
+                      ),
                     ],
                   ),
-                  Text('标准',
-                      style: TextStyle(color: accentColor, fontSize: 14)),
+                  Text(
+                    scaleLabel,
+                    style: TextStyle(color: accentColor, fontSize: 14),
+                  ),
                 ],
               ),
               const SizedBox(height: 16),
               Row(
                 children: [
-                  const Text('A',
-                      style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  const Text(
+                    'A',
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
                   Expanded(
                     child: SliderTheme(
-                      data: SliderTheme.of(context).copyWith(
+                      data: SliderThemeData(
                         activeTrackColor: accentColor,
-                        inactiveTrackColor: Colors.grey.withOpacity(0.2),
+                        inactiveTrackColor: Colors.grey.withValues(alpha: 0.2),
                         thumbColor: Colors.white,
-                        overlayColor: accentColor.withOpacity(0.2),
+                        overlayColor: accentColor.withValues(alpha: 0.2),
                         trackHeight: 4,
                       ),
                       child: Slider(
-                        value: _fontSize,
-                        onChanged: (v) => setState(() => _fontSize = v),
+                        value: scale,
+                        onChanged: controller.setSubtitleScale,
                         min: 0.0,
                         max: 1.0,
                         divisions: 10,
                       ),
                     ),
                   ),
-                  const Text('A',
-                      style: TextStyle(color: Colors.white, fontSize: 18)),
+                  const Text(
+                    'A',
+                    style: TextStyle(color: Colors.white, fontSize: 18),
+                  ),
                 ],
               ),
             ],
