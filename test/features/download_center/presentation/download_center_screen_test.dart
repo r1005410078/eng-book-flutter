@@ -19,6 +19,9 @@ class _FakeRepo implements DownloadCenterRepository {
   Future<void> deleteCourseArtifacts(String courseId) async {}
 
   @override
+  Future<void> clearAllCourseArtifacts() async {}
+
+  @override
   Future<bool> isInstalled(String courseId) async => false;
 
   @override
@@ -49,11 +52,14 @@ void main() {
       id: courseId,
       title: 'Course A',
       tags: ['全部'],
-      sizeBytes: 100,
       version: '1.0.0',
-      url: 'http://example.com/a.zip',
-      hash: '',
       cover: null,
+      asset: CourseAsset(
+        mode: CourseAssetMode.zip,
+        sizeBytes: 100,
+        sha256: '',
+        url: 'http://example.com/a.zip',
+      ),
     );
 
     final repo = _FakeRepo({

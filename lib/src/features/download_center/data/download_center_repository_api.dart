@@ -6,6 +6,7 @@ abstract class DownloadCenterRepository {
   Future<Map<String, DownloadTaskSnapshot>> loadSnapshots();
   Future<void> persistSnapshots(Map<String, DownloadTaskSnapshot> snapshots);
   Future<bool> isInstalled(String courseId);
+  Future<void> clearAllCourseArtifacts();
   Future<void> startOrResumeDownload({
     required PresetCatalogCourse course,
     required DownloadTaskSnapshot snapshot,

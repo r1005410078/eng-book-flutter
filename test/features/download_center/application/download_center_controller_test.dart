@@ -30,6 +30,12 @@ class _FakeRepo implements DownloadCenterRepository {
   }
 
   @override
+  Future<void> clearAllCourseArtifacts() async {
+    snapshots = {};
+    installed.clear();
+  }
+
+  @override
   Future<bool> isInstalled(String courseId) async =>
       installed.contains(courseId);
 
@@ -70,11 +76,14 @@ PresetCatalogCourse _course({String id = 'course-a', int size = 200}) {
     id: id,
     title: 'Course $id',
     tags: const ['全部'],
-    sizeBytes: size,
     version: '1.0.0',
-    url: 'http://example.com/$id.zip',
-    hash: '',
     cover: null,
+    asset: CourseAsset(
+      mode: CourseAssetMode.zip,
+      sizeBytes: size,
+      sha256: '',
+      url: 'http://example.com/$id.zip',
+    ),
   );
 }
 
@@ -149,5 +158,43 @@ void main() {
     final snapshot = state.snapshotFor(course.id);
     expect(snapshot.status, DownloadStatus.failed);
     expect(snapshot.error, contains('存储空间不足'));
+  });
+
+  test('clearAllCaches resets snapshots to notDownloaded', () async {
+    final course = _course(id: 'course-a', size: 100);
+    final repo = _FakeRepo(
+      snapshots: {
+        'course-a': const DownloadTaskSnapshot(
+          courseId: 'course-a',
+          status: DownloadStatus.installed,
+          downloadedBytes: 100,
+          totalBytes: 100,
+        ),
+      },
+      availableBytes: 1024 * 1024,
+      installed: {'course-a'},
+    );
+
+    final container = ProviderContainer(
+      overrides: [
+        downloadCenterRepositoryProvider.overrideWithValue(repo),
+        downloadCenterControllerProvider.overrideWith(
+          (ref) => DownloadCenterController(
+            ref,
+            catalogLoader: () async => [course],
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await _waitForData(container);
+    await container
+        .read(downloadCenterControllerProvider.notifier)
+        .clearAllCaches();
+
+    final state = container.read(downloadCenterControllerProvider).value!;
+    expect(state.snapshotFor('course-a').status, DownloadStatus.notDownloaded);
+    expect(repo.installed.contains('course-a'), isFalse);
   });
 }

@@ -199,6 +199,12 @@ class DownloadCenterController
     );
   }
 
+  Future<void> clearAllCaches() async {
+    await _repo.clearAllCourseArtifacts();
+    bumpCourseLibraryRevision();
+    await refresh();
+  }
+
   void _updateSnapshot(DownloadTaskSnapshot snapshot) {
     final currentState = state.valueOrNull;
     if (currentState == null) return;

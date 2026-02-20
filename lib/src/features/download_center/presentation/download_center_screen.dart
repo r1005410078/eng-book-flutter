@@ -53,6 +53,37 @@ class DownloadCenterScreen extends ConsumerWidget {
         title: const Text('下载中心'),
         actions: [
           IconButton(
+            tooltip: '清除所有缓存',
+            onPressed: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('清除所有课程缓存'),
+                  content: const Text(
+                    '将删除下载中心安装/下载的全部课程数据和缓存，且会清空当前学习进度。',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('取消'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('清除'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed != true) return;
+              await LearningResumeStore.clear();
+              await controller.clearAllCaches();
+              if (context.mounted) {
+                context.go(Routes.home);
+              }
+            },
+            icon: const Icon(Icons.delete_sweep_rounded),
+          ),
+          IconButton(
             onPressed: controller.refresh,
             icon: const Icon(Icons.refresh_rounded),
           ),

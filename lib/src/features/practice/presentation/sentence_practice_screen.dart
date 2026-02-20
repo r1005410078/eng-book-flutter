@@ -76,8 +76,8 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
   String? _currentCourseTitle;
   String? _currentMediaPath;
 
-  bool _showEnglish = true;
-  bool _showChinese = true;
+  bool _showEnglish = false;
+  bool _showChinese = false;
   bool _blurTranslationByDefault = false;
   double _subtitleScale = 0.5;
   late VideoPlayerController _videoController;

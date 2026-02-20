@@ -30,8 +30,8 @@ class PracticePlaybackSettings {
 
   static const defaults = PracticePlaybackSettings(
     playbackSpeed: 1.0,
-    showEnglish: true,
-    showChinese: true,
+    showEnglish: false,
+    showChinese: false,
     blurTranslationByDefault: false,
     completionMode: PlaybackCompletionMode.courseLoop,
     autoRecord: false,

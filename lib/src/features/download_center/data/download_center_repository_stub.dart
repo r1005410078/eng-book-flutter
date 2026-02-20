@@ -13,6 +13,9 @@ class DownloadCenterRepositoryImpl implements DownloadCenterRepository {
   Future<void> deleteCourseArtifacts(String courseId) async {}
 
   @override
+  Future<void> clearAllCourseArtifacts() async {}
+
+  @override
   Future<bool> isInstalled(String courseId) async => false;
 
   @override
