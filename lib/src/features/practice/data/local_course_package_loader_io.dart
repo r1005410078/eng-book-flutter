@@ -57,6 +57,61 @@ class LocalCourseCatalog {
   });
 }
 
+String _normalizeCourseTitle({
+  required String title,
+  required String courseId,
+  required Directory packageDir,
+}) {
+  final rawTitle = title.trim();
+  if (rawTitle.isNotEmpty && !_looksLikeMachineCourseId(rawTitle)) {
+    return rawTitle;
+  }
+  final fallback = _readCourseTitleFromTaskMeta(packageDir);
+  if (fallback != null && fallback.trim().isNotEmpty) {
+    return fallback.trim();
+  }
+  if (rawTitle.isNotEmpty) return rawTitle;
+  return courseId.trim().isNotEmpty ? courseId.trim() : '本地课程';
+}
+
+bool _looksLikeMachineCourseId(String value) {
+  final text = value.trim().toLowerCase();
+  if (text.isEmpty) return true;
+  return text.startsWith('course_') || text.startsWith('task_');
+}
+
+String? _readCourseTitleFromTaskMeta(Directory packageDir) {
+  final taskId = _taskIdFromPackageDir(packageDir);
+  if (taskId == null || taskId.isEmpty) return null;
+  final taskFile = File('${packageDir.parent.path}/$taskId.json');
+  if (!taskFile.existsSync()) return null;
+  try {
+    final payload = jsonDecode(taskFile.readAsStringSync());
+    if (payload is! Map) return null;
+    final courseTitle = (payload['course_title'] ?? '').toString().trim();
+    if (courseTitle.isNotEmpty) return courseTitle;
+    final title = (payload['title'] ?? '').toString().trim();
+    if (title.isNotEmpty) return title;
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
+String? _taskIdFromPackageDir(Directory packageDir) {
+  final normalized = packageDir.path.replaceAll('\\', '/');
+  const marker = '/tasks/';
+  final idx = normalized.lastIndexOf(marker);
+  if (idx < 0) return null;
+  final tail = normalized.substring(idx + marker.length);
+  final segments = tail.split('/');
+  if (segments.length < 2) return null;
+  final taskId = segments.first.trim();
+  if (!taskId.startsWith('task_')) return null;
+  if (segments[1] != 'package') return null;
+  return taskId;
+}
+
 Future<String?> discoverLatestReadyPackageRoot() async {
   final runtimeTasks = await resolveRuntimeTasksDir();
   if (!runtimeTasks.existsSync()) return null;
@@ -171,11 +226,17 @@ Future<List<LocalCourseSummary>> listLocalCoursePackages() async {
 
     if (firstSentenceId == null) continue;
 
+    final courseId = (manifest['course_id'] ?? 'local_course').toString();
+    final rawTitle =
+        (manifest['title'] ?? manifest['course_id'] ?? '本地课程').toString();
     summaries.add(
       LocalCourseSummary(
-        courseId: (manifest['course_id'] ?? 'local_course').toString(),
-        title:
-            (manifest['title'] ?? manifest['course_id'] ?? '本地课程').toString(),
+        courseId: courseId,
+        title: _normalizeCourseTitle(
+          title: rawTitle,
+          courseId: courseId,
+          packageDir: packageDir,
+        ),
         lessonCount: _toInt(manifest['lesson_count']),
         packageRoot: packageDir.path,
         firstSentenceId: firstSentenceId,
@@ -252,8 +313,14 @@ Future<LocalSentenceLoadResult> loadSentencesFromLocalPackage({
     );
   }
 
-  final courseTitle =
+  final courseId = (manifest['course_id'] ?? 'local_course').toString();
+  final rawCourseTitle =
       (manifest['title'] ?? manifest['course_id'] ?? '本地课程').toString();
+  final courseTitle = _normalizeCourseTitle(
+    title: rawCourseTitle,
+    courseId: courseId,
+    packageDir: packageDir,
+  );
   final lessons = manifest['lessons'];
   if (lessons is! List || lessons.isEmpty) {
     return const LocalSentenceLoadResult(
@@ -376,7 +443,12 @@ Future<LocalCourseCatalog?> _readCourseCatalogFromPackageDir(
   if (manifest is! Map) return null;
 
   final courseId = (manifest['course_id'] ?? 'local_course').toString();
-  final title = (manifest['title'] ?? courseId).toString();
+  final rawTitle = (manifest['title'] ?? courseId).toString();
+  final title = _normalizeCourseTitle(
+    title: rawTitle,
+    courseId: courseId,
+    packageDir: packageDir,
+  );
   final lessons = manifest['lessons'];
   if (lessons is! List || lessons.isEmpty) return null;
 

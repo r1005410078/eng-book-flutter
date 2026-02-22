@@ -83,9 +83,13 @@ Future<List<CourseUnitPickerCourse>> buildCourseUnitPickerCourses({
       resolvedPackage,
       totalSentenceCount: sentences.length,
     );
+    final existing = map[resolvedPackage];
+    final existingTitle = existing?.courseTitle.trim() ?? '';
     map[resolvedPackage] = CourseUnitPickerCourse(
       packageRoot: resolvedPackage,
-      courseTitle: resolvedCourseTitle,
+      courseTitle: existingTitle.isNotEmpty
+          ? existing!.courseTitle
+          : resolvedCourseTitle,
       units: units,
       practiceCount: courseMetrics.practiceCount,
       progressPercent: courseMetrics.progressPercent,

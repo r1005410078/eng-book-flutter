@@ -300,8 +300,11 @@ class _SentencePracticeScreenState extends ConsumerState<SentencePracticeScreen>
         _lessonPageForSentenceIndex(lessonStarts, targetIndex);
     final mediaPath = list[targetIndex].mediaPath;
     final mediaType = list[targetIndex].mediaType;
-    final courseTitle =
-        courseTitleInput ?? list[targetIndex].courseTitle ?? '本地课程';
+    final sentenceCourseTitle = (list[targetIndex].courseTitle ?? '').trim();
+    final inputCourseTitle = (courseTitleInput ?? '').trim();
+    final courseTitle = sentenceCourseTitle.isNotEmpty
+        ? sentenceCourseTitle
+        : (inputCourseTitle.isNotEmpty ? inputCourseTitle : '本地课程');
 
     _clearPreviewControllerCache();
     _lessonLastSentenceIndex.clear();

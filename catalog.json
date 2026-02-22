@@ -1,17 +1,39 @@
 {
   "version": 1,
-  "updated_at": "2026-02-19T00:00:00Z",
   "courses": [
     {
-      "id": "course_courses",
-      "title": "course_courses",
-      "tags": ["全部", "视频", "入门"],
-      "level": "entry",
-      "size_bytes": 30123546,
+      "id": "course_xingainian-2",
+      "title": "新概念英语第一册讲解",
+      "tags": [
+        "全部",
+        "视频",
+        "入门"
+      ],
       "version": "1.0.0",
-      "cover_url": "",
-      "download_url": "http://home.rongts.tech:9000/courses/packages/course_courses/1.0.0/course.zip",
-      "sha256": "1da4c1f7d8d315ed7563ee7cf405ad2a1bbe99b20bd2eada61645b09423fd5a8"
+      "cover": "",
+      "asset": {
+        "mode": "segmented_zip",
+        "manifest_url": "http://home.rongts.tech:9000/engbook-courses/course_xingainian-2/1.0.0/course_xingainian-2-fixed.zip.manifest.json",
+        "size_bytes": 1854714318,
+        "sha256": "def8e58e75c2278bd0bbb69d33f5d79202c0280c8b16c9dc97c50d43603910c2"
+      }
+    },
+    {
+      "id": "course_新概念i",
+      "title": "新概念I",
+      "tags": [
+        "全部",
+        "视频",
+        "入门"
+      ],
+      "version": "1.0.0",
+      "cover": "",
+      "asset": {
+        "mode": "zip",
+        "url": "http://home.rongts.tech:9000/engbook-courses/course_新概念i/1.0.0/course_新概念i.zip",
+        "size_bytes": 254887697,
+        "sha256": "08b01e68efe2cf4d25a340ab48ac8eddb79df18f3cbb4e4019d4345eec18b9d7"
+      }
     }
   ]
 }

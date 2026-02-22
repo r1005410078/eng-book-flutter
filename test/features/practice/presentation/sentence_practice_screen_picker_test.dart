@@ -116,13 +116,13 @@ void main() {
     return buildResult(courseASentences);
   }
 
-  Widget buildApp() {
+  Widget buildApp({String courseTitle = '课程A'}) {
     return ProviderScope(
       child: MaterialApp(
         home: SentencePracticeScreen(
           sentenceId: 'a-1',
           packageRoot: pkgA,
-          courseTitle: '课程A',
+          courseTitle: courseTitle,
           loadSentencesOverride: loader,
           loadCourseCatalogsOverride: () async => catalogs,
           skipMediaSetupForTest: true,
@@ -175,5 +175,17 @@ void main() {
     expect(find.text('A单元1'), findsOneWidget);
     expect(find.text('A sentence 1'), findsOneWidget);
     expect(find.text('B sentence 1'), findsNothing);
+  });
+
+  testWidgets('picker keeps manifest title when route title is course id',
+      (tester) async {
+    await tester.pumpWidget(buildApp(courseTitle: 'course_a'));
+    await settle(tester);
+
+    await tester.tap(find.text('A单元1'));
+    await settle(tester);
+
+    expect(find.text('课程A'), findsOneWidget);
+    expect(find.textContaining('course_a'), findsNothing);
   });
 }
