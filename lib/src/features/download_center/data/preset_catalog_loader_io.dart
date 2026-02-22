@@ -7,21 +7,56 @@ class PresetCatalogCourse {
   final String id;
   final String title;
   final List<String> tags;
-  final int sizeBytes;
   final String version;
-  final String url;
-  final String hash;
   final String? cover;
+  final CourseAsset asset;
 
   const PresetCatalogCourse({
     required this.id,
     required this.title,
     required this.tags,
-    required this.sizeBytes,
     required this.version,
-    required this.url,
-    required this.hash,
     required this.cover,
+    required this.asset,
+  });
+
+  int get sizeBytes => asset.sizeBytes;
+  String get hash => asset.sha256;
+}
+
+enum CourseAssetMode { zip, segmentedZip }
+
+class CourseAssetPart {
+  final int index;
+  final String objectKey;
+  final int sizeBytes;
+  final String sha256;
+  final String url;
+
+  const CourseAssetPart({
+    required this.index,
+    required this.objectKey,
+    required this.sizeBytes,
+    required this.sha256,
+    required this.url,
+  });
+}
+
+class CourseAsset {
+  final CourseAssetMode mode;
+  final int sizeBytes;
+  final String sha256;
+  final String? url;
+  final String? manifestUrl;
+  final List<CourseAssetPart> parts;
+
+  const CourseAsset({
+    required this.mode,
+    required this.sizeBytes,
+    required this.sha256,
+    this.url,
+    this.manifestUrl,
+    this.parts = const [],
   });
 }
 
@@ -36,8 +71,9 @@ Future<List<PresetCatalogCourse>> loadPresetCatalogCourses() async {
       if (item is! Map) continue;
       final id = (item['id'] ?? item['course_id'] ?? '').toString().trim();
       final title = (item['title'] ?? item['name'] ?? '').toString().trim();
-      final url = (item['url'] ?? item['download_url'] ?? '').toString().trim();
       if (id.isEmpty || title.isEmpty) continue;
+      final asset = _parseAsset(item['asset']);
+      if (asset == null) continue;
 
       final tags = item['tags'] is List
           ? (item['tags'] as List)
@@ -45,25 +81,83 @@ Future<List<PresetCatalogCourse>> loadPresetCatalogCourses() async {
               .where((e) => e.isNotEmpty)
               .toList()
           : <String>[];
-      final size = _toInt(item['size_bytes'] ?? item['size']);
       final version = (item['version'] ?? '1.0.0').toString();
-      final hash = (item['hash'] ?? item['sha256'] ?? '').toString();
       final coverRaw = (item['cover'] ?? item['cover_url'] ?? '').toString();
       list.add(
         PresetCatalogCourse(
           id: id,
           title: title,
           tags: tags,
-          sizeBytes: size,
           version: version,
-          url: url,
-          hash: hash,
           cover: coverRaw.isEmpty ? null : coverRaw,
+          asset: asset,
         ),
       );
     }
   }
   return list;
+}
+
+CourseAsset? _parseAsset(dynamic raw) {
+  if (raw is! Map) return null;
+  final modeRaw = (raw['mode'] ?? '').toString().trim().toLowerCase();
+  final sizeBytes = _toInt(raw['size_bytes']);
+  final sha256 = (raw['sha256'] ?? '').toString().trim().toLowerCase();
+  if (sizeBytes <= 0 || sha256.isEmpty) return null;
+
+  if (modeRaw == 'zip') {
+    final url = (raw['url'] ?? '').toString().trim();
+    if (url.isEmpty) return null;
+    return CourseAsset(
+      mode: CourseAssetMode.zip,
+      sizeBytes: sizeBytes,
+      sha256: sha256,
+      url: url,
+    );
+  }
+
+  if (modeRaw == 'segmented_zip') {
+    final manifestUrl = (raw['manifest_url'] ?? '').toString().trim();
+    if (manifestUrl.isEmpty) return null;
+    final partsRaw = raw['parts'];
+    final parts = <CourseAssetPart>[];
+    if (partsRaw is List) {
+      for (final row in partsRaw) {
+        if (row is! Map) continue;
+        final index = _toInt(row['index']);
+        final objectKey = (row['object_key'] ?? '').toString().trim();
+        final partSize = _toInt(row['size_bytes']);
+        final partSha = (row['sha256'] ?? '').toString().trim().toLowerCase();
+        final partUrl = (row['url'] ?? '').toString().trim();
+        if (index <= 0 ||
+            objectKey.isEmpty ||
+            partSize <= 0 ||
+            partSha.isEmpty ||
+            partUrl.isEmpty) {
+          continue;
+        }
+        parts.add(
+          CourseAssetPart(
+            index: index,
+            objectKey: objectKey,
+            sizeBytes: partSize,
+            sha256: partSha,
+            url: partUrl,
+          ),
+        );
+      }
+      parts.sort((a, b) => a.index.compareTo(b.index));
+    }
+    return CourseAsset(
+      mode: CourseAssetMode.segmentedZip,
+      sizeBytes: sizeBytes,
+      sha256: sha256,
+      manifestUrl: manifestUrl,
+      parts: parts,
+    );
+  }
+
+  return null;
 }
 
 Future<dynamic> _loadRawCatalog() async {

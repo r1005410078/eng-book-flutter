@@ -53,11 +53,14 @@ void main() {
       id: courseId,
       title: 'Course A',
       tags: const ['全部'],
-      sizeBytes: zipBytes.length,
       version: '1.0.0',
-      url: 'http://127.0.0.1:${server.port}/course.zip',
-      hash: hash,
       cover: null,
+      asset: CourseAsset(
+        mode: CourseAssetMode.zip,
+        sizeBytes: zipBytes.length,
+        sha256: hash,
+        url: 'http://127.0.0.1:${server.port}/course.zip',
+      ),
     );
 
     await repo.startOrResumeDownload(
@@ -106,11 +109,15 @@ void main() {
       id: courseId,
       title: 'Course Hash Fail',
       tags: const ['全部'],
-      sizeBytes: zipBytes.length,
       version: '1.0.0',
-      url: 'http://127.0.0.1:${server.port}/course.zip',
-      hash: 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
       cover: null,
+      asset: CourseAsset(
+        mode: CourseAssetMode.zip,
+        sizeBytes: zipBytes.length,
+        sha256:
+            'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+        url: 'http://127.0.0.1:${server.port}/course.zip',
+      ),
     );
 
     await expectLater(
@@ -149,11 +156,14 @@ void main() {
       id: courseId,
       title: 'Broken',
       tags: const ['全部'],
-      sizeBytes: zipBytes.length,
       version: '1.0.0',
-      url: 'http://127.0.0.1:${server.port}/course.zip',
-      hash: '',
       cover: null,
+      asset: CourseAsset(
+        mode: CourseAssetMode.zip,
+        sizeBytes: zipBytes.length,
+        sha256: '',
+        url: 'http://127.0.0.1:${server.port}/course.zip',
+      ),
     );
 
     await expectLater(
@@ -176,6 +186,219 @@ void main() {
         Directory('${tempDir.path}/.runtime/tasks/task_download_$courseId');
     expect(taskJson.existsSync(), isFalse);
     expect(taskDir.existsSync(), isFalse);
+  });
+
+  test('segmented download merges and installs successfully', () async {
+    const courseId = 'course-segmented-ok';
+    final zipBytes = _buildValidCourseZip(courseId: courseId);
+    final fixture = _buildSegmentedFixture(
+      baseUrl: 'http://127.0.0.1:${server.port}',
+      zipBytes: zipBytes,
+      partSize: 512,
+    );
+
+    server.listen((req) async {
+      final path = req.uri.path;
+      if (path == '/manifest.json') {
+        final body = utf8.encode(jsonEncode(fixture.manifest));
+        req.response
+          ..statusCode = 200
+          ..headers.contentType = ContentType.json
+          ..headers.contentLength = body.length
+          ..add(body);
+        await req.response.close();
+        return;
+      }
+      final bytes = fixture.partData[path];
+      if (bytes == null) {
+        req.response.statusCode = 404;
+        await req.response.close();
+        return;
+      }
+      await _serveBytes(req, bytes);
+    });
+
+    final repo = DownloadCenterRepositoryImpl();
+    final snapshots = <DownloadTaskSnapshot>[];
+    final course = PresetCatalogCourse(
+      id: courseId,
+      title: 'Segmented',
+      tags: const ['全部'],
+      version: '1.0.0',
+      cover: null,
+      asset: CourseAsset(
+        mode: CourseAssetMode.segmentedZip,
+        sizeBytes: zipBytes.length,
+        sha256: sha256.convert(zipBytes).toString(),
+        manifestUrl: 'http://127.0.0.1:${server.port}/manifest.json',
+      ),
+    );
+
+    await repo.startOrResumeDownload(
+      course: course,
+      snapshot: const DownloadTaskSnapshot(
+        courseId: courseId,
+        status: DownloadStatus.notDownloaded,
+        downloadedBytes: 0,
+        totalBytes: 0,
+      ),
+      onProgress: snapshots.add,
+    );
+
+    expect(snapshots.any((s) => s.totalParts > 1), isTrue);
+    expect(snapshots.last.status, DownloadStatus.installed);
+    final taskJson =
+        File('${tempDir.path}/.runtime/tasks/task_download_$courseId.json');
+    expect(taskJson.existsSync(), isTrue);
+  });
+
+  test('segmented part hash mismatch fails and does not install', () async {
+    const courseId = 'course-segmented-bad-hash';
+    final zipBytes = _buildValidCourseZip(courseId: courseId);
+    final fixture = _buildSegmentedFixture(
+      baseUrl: 'http://127.0.0.1:${server.port}',
+      zipBytes: zipBytes,
+      partSize: 32 * 1024,
+    );
+    if (fixture.manifest['parts'] is List &&
+        (fixture.manifest['parts'] as List).isNotEmpty) {
+      (fixture.manifest['parts'] as List).first['sha256'] =
+          'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+    }
+
+    server.listen((req) async {
+      final path = req.uri.path;
+      if (path == '/manifest.json') {
+        final body = utf8.encode(jsonEncode(fixture.manifest));
+        req.response
+          ..statusCode = 200
+          ..headers.contentType = ContentType.json
+          ..headers.contentLength = body.length
+          ..add(body);
+        await req.response.close();
+        return;
+      }
+      final bytes = fixture.partData[path];
+      if (bytes == null) {
+        req.response.statusCode = 404;
+        await req.response.close();
+        return;
+      }
+      await _serveBytes(req, bytes);
+    });
+
+    final repo = DownloadCenterRepositoryImpl();
+    final course = PresetCatalogCourse(
+      id: courseId,
+      title: 'Segmented Hash Fail',
+      tags: const ['全部'],
+      version: '1.0.0',
+      cover: null,
+      asset: CourseAsset(
+        mode: CourseAssetMode.segmentedZip,
+        sizeBytes: zipBytes.length,
+        sha256: sha256.convert(zipBytes).toString(),
+        manifestUrl: 'http://127.0.0.1:${server.port}/manifest.json',
+      ),
+    );
+
+    await expectLater(
+      repo.startOrResumeDownload(
+        course: course,
+        snapshot: const DownloadTaskSnapshot(
+          courseId: courseId,
+          status: DownloadStatus.notDownloaded,
+          downloadedBytes: 0,
+          totalBytes: 0,
+        ),
+        onProgress: (_) {},
+      ),
+      throwsException,
+    );
+
+    final taskJson =
+        File('${tempDir.path}/.runtime/tasks/task_download_$courseId.json');
+    expect(taskJson.existsSync(), isFalse);
+  });
+
+  test('segmented download resumes from partial part file', () async {
+    const courseId = 'course-segmented-resume';
+    final zipBytes = _buildValidCourseZip(courseId: courseId);
+    final fixture = _buildSegmentedFixture(
+      baseUrl: 'http://127.0.0.1:${server.port}',
+      zipBytes: zipBytes,
+      partSize: 512,
+    );
+
+    server.listen((req) async {
+      final path = req.uri.path;
+      if (path == '/manifest.json') {
+        final body = utf8.encode(jsonEncode(fixture.manifest));
+        req.response
+          ..statusCode = 200
+          ..headers.contentType = ContentType.json
+          ..headers.contentLength = body.length
+          ..add(body);
+        await req.response.close();
+        return;
+      }
+      final bytes = fixture.partData[path];
+      if (bytes == null) {
+        req.response.statusCode = 404;
+        await req.response.close();
+        return;
+      }
+      await _serveBytes(req, bytes, chunkSize: 2048);
+    });
+
+    final repo = DownloadCenterRepositoryImpl();
+    final course = PresetCatalogCourse(
+      id: courseId,
+      title: 'Segmented Resume',
+      tags: const ['全部'],
+      version: '1.0.0',
+      cover: null,
+      asset: CourseAsset(
+        mode: CourseAssetMode.segmentedZip,
+        sizeBytes: zipBytes.length,
+        sha256: sha256.convert(zipBytes).toString(),
+        manifestUrl: 'http://127.0.0.1:${server.port}/manifest.json',
+      ),
+    );
+
+    // Pre-create a partial first part to verify resumable ranged fetch.
+    await repo.queryAvailableBytes();
+    final tmpPart = File(
+      '${tempDir.path}/.runtime/download_center/tmp/${courseId}_parts/part_0001',
+    );
+    await tmpPart.parent.create(recursive: true);
+    final firstPartBytes = fixture.partData['/parts/part-0001']!;
+    await tmpPart.writeAsBytes(
+      firstPartBytes.sublist(0, firstPartBytes.length ~/ 2),
+      flush: true,
+    );
+
+    final resumeSnapshots = <DownloadTaskSnapshot>[];
+    await repo.startOrResumeDownload(
+      course: course,
+      snapshot: const DownloadTaskSnapshot(
+        courseId: courseId,
+        status: DownloadStatus.paused,
+        downloadedBytes: 0,
+        totalBytes: 0,
+        currentPartIndex: 1,
+        currentPartDownloadedBytes: 1,
+      ),
+      onProgress: resumeSnapshots.add,
+    );
+    expect(
+      resumeSnapshots.any((s) => s.currentPartIndex >= 1),
+      isTrue,
+    );
+    expect(resumeSnapshots.last.status, DownloadStatus.installed);
+    final taskJson =
+        File('${tempDir.path}/.runtime/tasks/task_download_$courseId.json');
+    expect(taskJson.existsSync(), isTrue);
   });
 }
 
@@ -224,4 +447,81 @@ List<int> _buildInvalidZipWithoutManifest() {
   final archive = Archive()
     ..addFile(ArchiveFile('README.txt', 7, utf8.encode('invalid')));
   return ZipEncoder().encode(archive)!;
+}
+
+class _SegmentedFixture {
+  final Map<String, dynamic> manifest;
+  final Map<String, List<int>> partData;
+
+  _SegmentedFixture({
+    required this.manifest,
+    required this.partData,
+  });
+}
+
+_SegmentedFixture _buildSegmentedFixture({
+  required String baseUrl,
+  required List<int> zipBytes,
+  required int partSize,
+}) {
+  final parts = <Map<String, dynamic>>[];
+  final partData = <String, List<int>>{};
+  var index = 1;
+  for (var offset = 0; offset < zipBytes.length; offset += partSize) {
+    final end = (offset + partSize < zipBytes.length)
+        ? (offset + partSize)
+        : zipBytes.length;
+    final bytes = zipBytes.sublist(offset, end);
+    final path = '/parts/part-${index.toString().padLeft(4, '0')}';
+    parts.add({
+      'index': index,
+      'object_key': 'test$path',
+      'size_bytes': bytes.length,
+      'sha256': sha256.convert(bytes).toString(),
+      'url': '$baseUrl$path',
+    });
+    partData[path] = bytes;
+    index += 1;
+  }
+
+  final manifest = <String, dynamic>{
+    'source_size_bytes': zipBytes.length,
+    'source_sha256': sha256.convert(zipBytes).toString(),
+    'parts': parts,
+  };
+  return _SegmentedFixture(manifest: manifest, partData: partData);
+}
+
+Future<void> _serveBytes(
+  HttpRequest req,
+  List<int> data, {
+  int chunkSize = 4096,
+}) async {
+  var start = 0;
+  final rangeHeader = req.headers.value(HttpHeaders.rangeHeader);
+  if (rangeHeader != null && rangeHeader.startsWith('bytes=')) {
+    final raw = rangeHeader.substring('bytes='.length);
+    final begin = raw.split('-').first;
+    start = int.tryParse(begin) ?? 0;
+    if (start < 0 || start >= data.length) {
+      req.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+      await req.response.close();
+      return;
+    }
+    req.response.statusCode = HttpStatus.partialContent;
+    req.response.headers.set(
+      HttpHeaders.contentRangeHeader,
+      'bytes $start-${data.length - 1}/${data.length}',
+    );
+  } else {
+    req.response.statusCode = HttpStatus.ok;
+  }
+  final remain = data.sublist(start);
+  req.response.headers.contentLength = remain.length;
+  for (var i = 0; i < remain.length; i += chunkSize) {
+    final end = (i + chunkSize < remain.length) ? i + chunkSize : remain.length;
+    req.response.add(remain.sublist(i, end));
+    await req.response.flush();
+  }
+  await req.response.close();
 }

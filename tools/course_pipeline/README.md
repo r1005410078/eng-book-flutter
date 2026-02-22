@@ -20,7 +20,23 @@ course-pipeline package inspect ./course.zip
 Build `catalog.json` with computed `sha256` and `size_bytes`:
 ```bash
 course-pipeline package build-catalog ./course.zip \
-  --download-url http://home.rongts.tech:9000/engbook-courses/course.zip \
+  --mode zip \
+  --zip-url http://home.rongts.tech/engbook-courses/course.zip \
+  --course-id course_daily_english \
+  --title "Daily English" \
+  --tags 全部,视频,入门 \
+  --out ./catalog.json
+```
+
+By default, `--out` catalog is merged by `course_id` (update same id / keep others). Use `--catalog-replace` to overwrite it.
+
+Auto mode by threshold (small zip / large segmented):
+```bash
+course-pipeline package build-catalog ./course.zip \
+  --mode auto \
+  --threshold-mib 512 \
+  --zip-url http://home.rongts.tech/engbook-courses/course.zip \
+  --manifest-url http://home.rongts.tech/engbook-courses/course.zip.manifest.json \
   --course-id course_daily_english \
   --title "Daily English" \
   --out ./catalog.json
@@ -29,13 +45,81 @@ course-pipeline package build-catalog ./course.zip \
 Upload package to MinIO (requires `mc`):
 ```bash
 course-pipeline package upload-minio ./course.zip \
-  --endpoint http://home.rongts.tech:9000 \
+  --endpoint http://home.rongts.tech \
   --bucket engbook-courses \
   --object-key course.zip \
   --make-bucket \
   --access-key "$COURSE_PIPELINE_MINIO_ACCESS_KEY" \
   --secret-key "$COURSE_PIPELINE_MINIO_SECRET_KEY"
 ```
+
+Segmented upload for large packages (more stable on low-memory VMs):
+```bash
+course-pipeline package upload-minio-segmented ./course.zip \
+  --endpoint http://home.rongts.tech \
+  --bucket engbook-courses \
+  --object-prefix course.zip \
+  --part-size-mib 256 \
+  --manifest-object-key course.zip.manifest.json \
+  --access-key "$COURSE_PIPELINE_MINIO_ACCESS_KEY" \
+  --secret-key "$COURSE_PIPELINE_MINIO_SECRET_KEY"
+```
+
+This command uploads `course.zip.part-0001` ... `course.zip.part-XXXX` and writes a manifest JSON locally (and to MinIO by default).
+
+Restore package from segmented manifest:
+```bash
+course-pipeline package download-minio-segmented \
+  --manifest-object-key course.zip.manifest.json \
+  --endpoint http://home.rongts.tech \
+  --bucket engbook-courses \
+  --out ./course-restored.zip \
+  --access-key "$COURSE_PIPELINE_MINIO_ACCESS_KEY" \
+  --secret-key "$COURSE_PIPELINE_MINIO_SECRET_KEY"
+```
+
+Or restore from a local manifest file:
+```bash
+course-pipeline package download-minio-segmented \
+  --manifest-file ./course.zip.parts.json \
+  --out ./course-restored.zip \
+  --access-key "$COURSE_PIPELINE_MINIO_ACCESS_KEY" \
+  --secret-key "$COURSE_PIPELINE_MINIO_SECRET_KEY"
+```
+
+One command publish (auto choose zip/segmented by threshold) and generate catalog:
+```bash
+course-pipeline package publish-minio-auto ./course.zip \
+  --endpoint http://home.rongts.tech \
+  --bucket engbook-courses \
+  --course-id course_daily_english \
+  --title "Daily English" \
+  --threshold-mib 512 \
+  --part-size-mib 256 \
+  --object-prefix course_daily_english/1.0.0/course.zip \
+  --catalog-out ./catalog.json \
+  --access-key "$COURSE_PIPELINE_MINIO_ACCESS_KEY" \
+  --secret-key "$COURSE_PIPELINE_MINIO_SECRET_KEY"
+```
+
+Default object path is `<course_id>/<version_name>/<file_name>` to avoid overwrite across versions.  
+`catalog-out` is merged by `course_id` by default; use `--catalog-replace` if you need full replacement.
+
+Republish all packaged runtime courses (delete remote `<course_id>/` first, then upload latest task package per course):
+```bash
+course-pipeline package republish-runtime \
+  --endpoint http://home.rongts.tech \
+  --bucket engbook-courses \
+  --catalog-out ./catalog.json \
+  --access-key "$COURSE_PIPELINE_MINIO_ACCESS_KEY" \
+  --secret-key "$COURSE_PIPELINE_MINIO_SECRET_KEY"
+```
+
+If a task has no `*.zip`, command will auto-pack `.runtime/tasks/<task_id>/package/` into `<course_id>.zip` before publishing.  
+Use `--no-pack-if-missing` to disable that behavior.
+
+If `file_path` is under `.runtime/tasks/<task_id>/...` (or `--task-id` is provided), command also writes:
+- `.runtime/tasks/<task_id>/output_publish.json`
 
 ## Human-in-the-loop Steps
 Use explicit step commands for AI stages:

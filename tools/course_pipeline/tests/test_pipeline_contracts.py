@@ -78,6 +78,121 @@ class TestPackageHelpers(unittest.TestCase):
         self.assertEqual(ops.normalize_endpoint_host("http://home.rongts.tech:9000"), "home.rongts.tech:9000")
         self.assertEqual(ops.normalize_endpoint_host("home.rongts.tech:9000"), "home.rongts.tech:9000")
 
+    def test_normalize_object_prefix(self):
+        self.assertEqual(ops.normalize_object_prefix("", "course.zip"), "course.zip")
+        self.assertEqual(ops.normalize_object_prefix("/packs//course", "course.zip"), "packs/course")
+
+    def test_build_default_publish_object_prefix(self):
+        self.assertEqual(
+            ops.build_default_publish_object_prefix("course_daily_english", "1.2.3", "course.zip"),
+            "course_daily_english/1.2.3/course.zip",
+        )
+
+    def test_merge_catalog_courses_append_new(self):
+        existing = {
+            "version": 1,
+            "courses": [
+                {"id": "course_a", "title": "A", "asset": {"mode": "zip"}},
+            ],
+        }
+        incoming = {"id": "course_b", "title": "B", "asset": {"mode": "zip"}}
+        merged = ops.merge_catalog_courses(existing, incoming, 2)
+        self.assertEqual(merged["version"], 2)
+        self.assertEqual([c["id"] for c in merged["courses"]], ["course_a", "course_b"])
+
+    def test_merge_catalog_courses_replace_same_id(self):
+        existing = {
+            "version": 1,
+            "courses": [
+                {"id": "course_a", "title": "A-old", "asset": {"mode": "zip"}},
+                {"id": "course_b", "title": "B", "asset": {"mode": "zip"}},
+            ],
+        }
+        incoming = {"id": "course_a", "title": "A-new", "asset": {"mode": "segmented_zip"}}
+        merged = ops.merge_catalog_courses(existing, incoming, 3)
+        self.assertEqual(merged["version"], 3)
+        self.assertEqual([c["id"] for c in merged["courses"]], ["course_a", "course_b"])
+        self.assertEqual(merged["courses"][0]["title"], "A-new")
+
+    def test_segmented_part_object_key(self):
+        self.assertEqual(ops.segmented_part_object_key("course.zip", 1, 123), "course.zip.part-0001")
+        self.assertEqual(ops.segmented_part_object_key("course.zip", 42, 12345), "course.zip.part-00042")
+
+    def test_normalize_segment_manifest_parts(self):
+        parts = [
+            {"index": 2, "object_key": "b.part-0002"},
+            {"index": 1, "object_key": "b.part-0001"},
+        ]
+        normalized = ops.normalize_segment_manifest_parts(parts)
+        self.assertEqual([p["index"] for p in normalized], [1, 2])
+
+    def test_normalize_segment_manifest_parts_invalid_gap(self):
+        with self.assertRaises(ValueError):
+            ops.normalize_segment_manifest_parts(
+                [
+                    {"index": 1, "object_key": "b.part-0001"},
+                    {"index": 3, "object_key": "b.part-0003"},
+                ]
+            )
+
+    def test_parser_has_republish_runtime_command(self):
+        parser = ops.build_parser()
+        args = parser.parse_args(
+            [
+                "package",
+                "republish-runtime",
+                "--endpoint",
+                "http://127.0.0.1:9000",
+                "--bucket",
+                "engbook-courses",
+            ]
+        )
+        self.assertEqual(args.entity, "package")
+        self.assertEqual(args.action, "republish-runtime")
+
+    def test_resolve_course_manifest_title_prefers_existing_manifest_title(self):
+        with tempfile.TemporaryDirectory() as td:
+            task = {"course_id": "course_demo"}
+            package_dir = Path(td)
+            (package_dir / "course_manifest.json").write_text(
+                json.dumps({"title": "课程标题A"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            title = ops.resolve_course_manifest_title(task, package_dir)
+            self.assertEqual(title, "课程标题A")
+
+    def test_resolve_course_manifest_title_fallback_catalog_title(self):
+        with tempfile.TemporaryDirectory() as td:
+            task = {"course_id": "course_demo"}
+            package_dir = Path(td)
+            (package_dir / "catalog.json").write_text(
+                json.dumps(
+                    {"courses": [{"id": "course_demo", "title": "课程标题B"}]},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            title = ops.resolve_course_manifest_title(task, package_dir)
+            self.assertEqual(title, "课程标题B")
+
+    def test_resolve_course_manifest_title_fallback_course_path_name(self):
+        with tempfile.TemporaryDirectory() as td:
+            task = {"course_id": "course_demo", "course_path": "/tmp/my_course_name"}
+            package_dir = Path(td)
+            title = ops.resolve_course_manifest_title(task, package_dir)
+            self.assertEqual(title, "my course name")
+
+    def test_resolve_course_manifest_title_ignores_id_like_manifest_title(self):
+        with tempfile.TemporaryDirectory() as td:
+            task = {"course_id": "course_demo", "course_path": "/tmp/friendly_name"}
+            package_dir = Path(td)
+            (package_dir / "course_manifest.json").write_text(
+                json.dumps({"title": "course_demo"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            title = ops.resolve_course_manifest_title(task, package_dir)
+            self.assertEqual(title, "friendly name")
+
 
 if __name__ == "__main__":
     unittest.main()
